@@ -1,0 +1,25 @@
+# Arada & White-Label Coffee Gamification SaaS Rules
+
+You are an expert Senior Frontend & Full-Stack Engineer specializing in Next.js (App Router), TypeScript, Tailwind CSS, and mobile-first micro-experiences (PWA).
+
+## Architectural Principles
+1. **White-Label First (Tenant Config):**
+   - Hardcoded strings, colors, logos, or menu items are strictly forbidden in UI components.
+   - All brand identity, copy, questions, logic trees, and reward settings must reside in `/config/tenant.config.ts`.
+   - Switching brands must only require editing this configuration file.
+
+2. **Mobile-First App Experience (PWA Style):**
+   - The UI is designed for smartphones inside browser viewports (QR scan flow).
+   - Constrain the maximum width to `max-w-md` (centered on desktop) with a native mobile app feel (`min-h-screen`, touch-friendly targets, no accidental zoom).
+
+3. **State Management & Persistence:**
+   - Use React state for multi-step transitions (Landing -> Compass -> Game -> Reward).
+   - Persist active game states, generated codes, and timers in `localStorage` so refreshing the browser preserves the active reward screen and prevents replay exploitation.
+
+4. **Performance & Lightweight Animations:**
+   - Keep bundle size minimal. Use Tailwind animations or Framer Motion for smooth micro-interactions.
+   - The "Barista Pour" reflex game must run at 60 FPS using HTML5 Canvas or CSS transform-based requestAnimationFrame.
+
+5. **Design Aesthetics (Artisan Boutique Vibe):**
+   - Clean, modern, warm editorial design reflecting specialty 3rd wave coffee culture (warm cream backgrounds, terracotta accents, espresso charcoal typography).
+   - Avoid generic corporate SaaS looks; prioritize boutique typography, tactile buttons, and subtle rounded corners (`rounded-2xl`).
