@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Lock } from "lucide-react";
@@ -8,6 +8,7 @@ import {
   tenantConfig,
   type CampaignProduct,
   type CompassOption,
+  type DuelGameId,
   type LogoShape,
   type TalkPrompt,
   type TenantCategory,
@@ -39,6 +40,8 @@ import {
 } from "@/lib/tenant";
 import { resolveTenantCategory } from "@/lib/landingCopy";
 import { applyThemeTokens } from "@/lib/themeCss";
+import { CampaignStatsCards, type CampaignStatsHandle } from "@/components/CampaignStatsCards";
+import { deleteCampaignEvents } from "@/lib/analytics";
 
 type AdminPanel =
   | "menu"
@@ -50,6 +53,7 @@ type AdminPanel =
   | "products"
   | "talk"
   | "social"
+  | "games"
   | "security";
 
 type CampaignFormProps = {
@@ -74,6 +78,7 @@ export function CampaignForm({
   const [saving, setSaving] = useState(false);
   const [panel, setPanel] = useState<AdminPanel>("menu");
   const [talkView, setTalkView] = useState<string | null>(null);
+  const statsRef = useRef<CampaignStatsHandle>(null);
 
   useEffect(() => {
     setForm(initial);
@@ -358,6 +363,30 @@ export function CampaignForm({
     });
   }
 
+  async function toggleGame(id: DuelGameId) {
+    const previous = form;
+    const next = {
+      ...form,
+      enabledGames: {
+        ...form.enabledGames,
+        [id]: !form.enabledGames[id],
+      },
+    };
+    setForm(next);
+    setSaving(true);
+    setError("");
+    try {
+      setForm(await onSave(next));
+      setMessage(copy.saved);
+      window.setTimeout(() => setMessage(""), 1800);
+    } catch {
+      setForm(previous);
+      setError(copy.saveError);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const resolvedCategory = resolveTenantCategory(form.category);
   const optionTagHint =
     copy.optionTagHint[resolvedCategory] ?? copy.optionTagHint.general;
@@ -384,6 +413,7 @@ export function CampaignForm({
       <form onSubmit={submit} className="mt-8 space-y-8">
         {panel === "menu" ? (
           <div className="space-y-4">
+            <CampaignStatsCards ref={statsRef} tenantId={tenantId} />
             <p className="text-sm leading-relaxed text-muted">{copy.menuLead}</p>
             <div className="grid gap-3">
               {(
@@ -395,6 +425,7 @@ export function CampaignForm({
                   "products",
                   "talk",
                   "social",
+                  "games",
                   "security",
                 ] as const
               ).map((id) => (
@@ -1235,6 +1266,51 @@ export function CampaignForm({
         </section>
         ) : null}
 
+        {panel === "games" ? (
+          <section className="space-y-5">
+            <div>
+              <SectionTitle>{copy.games.title}</SectionTitle>
+              <p className="mt-2 text-sm leading-relaxed text-muted">
+                {copy.games.lead}
+              </p>
+            </div>
+            <div className="space-y-3">
+              {(["trivia", "emoji", "swipe", "number"] as DuelGameId[]).map(
+                (id) => {
+                  const enabled = form.enabledGames[id];
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      role="switch"
+                      aria-checked={enabled}
+                      disabled={saving}
+                      onClick={() => void toggleGame(id)}
+                      className="flex min-h-16 w-full items-center justify-between gap-4 rounded-2xl bg-surface px-4 py-3 text-left"
+                    >
+                      <span className="text-sm font-medium leading-snug text-ink">
+                        {copy.games.labels[id]}
+                      </span>
+                      <span
+                        aria-hidden
+                        className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
+                          enabled ? "bg-primary" : "bg-ink/15"
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-1 size-5 rounded-full bg-white shadow-sm transition-transform ${
+                            enabled ? "translate-x-6" : "translate-x-1"
+                          }`}
+                        />
+                      </span>
+                    </button>
+                  );
+                },
+              )}
+            </div>
+          </section>
+        ) : null}
+
         {panel === "security" ? (
         <section className="space-y-5">
           <SectionTitle>{copy.sections.security}</SectionTitle>
@@ -1295,6 +1371,24 @@ export function CampaignForm({
       >
         {copy.openApp}
       </Link>
+      <button
+        type="button"
+        onClick={() => {
+          if (!window.confirm(copy.stats.resetLogsConfirm)) return;
+          void (async () => {
+            const ok = await deleteCampaignEvents(tenantId);
+            if (!ok) {
+              setError(copy.stats.resetLogsError);
+              return;
+            }
+            statsRef.current?.clearEvents();
+            setError("");
+          })();
+        }}
+        className="mt-6 w-full rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
+      >
+        {copy.stats.resetLogs}
+      </button>
     </section>
   );
 }

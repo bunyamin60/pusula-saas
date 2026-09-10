@@ -4,6 +4,8 @@ import {
   type CompassIcon,
   type CompassOption,
   type CompassQuestion,
+  type DuelGameId,
+  type EnabledGames,
   type TalkCategory,
   type TalkPrompt,
   type TenantCategory,
@@ -52,6 +54,7 @@ export interface CampaignSettings {
   products: CampaignProduct[];
   wheelPrizes: WheelPrize[];
   talkCategories: TalkCategory[];
+  enabledGames: EnabledGames;
   revision?: string;
 }
 
@@ -74,6 +77,7 @@ export interface TenantSettingsRow {
   category?: string | null;
   hero_title?: string | null;
   hero_subtitle?: string | null;
+  enabled_games?: unknown;
 }
 
 const EXTRA_PRODUCT_ID = "__extra";
@@ -178,6 +182,23 @@ export function defaultTalkCategories(): TalkCategory[] {
     ...category,
     prompts: category.prompts.map((prompt) => ({ ...prompt })),
   }));
+}
+
+const DUEL_GAME_IDS: DuelGameId[] = ["trivia", "emoji", "swipe", "number"];
+
+export function defaultEnabledGames(): EnabledGames {
+  return { ...tenantConfig.duel.enabledGames };
+}
+
+function parseEnabledGames(raw: unknown, fallback = defaultEnabledGames()): EnabledGames {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...fallback };
+  const stored = raw as Partial<Record<DuelGameId, unknown>>;
+  return Object.fromEntries(
+    DUEL_GAME_IDS.map((id) => [
+      id,
+      typeof stored[id] === "boolean" ? stored[id] : fallback[id],
+    ]),
+  ) as EnabledGames;
 }
 
 export function talkPromptsOf(
@@ -313,6 +334,7 @@ export function defaultCampaign(tenantId: string = DEFAULT_TENANT_ID): CampaignS
     products: defaultProducts(),
     wheelPrizes: defaultWheelPrizes(),
     talkCategories: defaultTalkCategories(),
+    enabledGames: defaultEnabledGames(),
   };
 }
 
@@ -619,6 +641,7 @@ function parseCampaign(raw: string): CampaignSettings | null {
       products: parseProducts(parsed.products),
       wheelPrizes: parsePrizes(parsed.wheelPrizes),
       talkCategories: parseTalkCategories(parsed.talkCategories),
+      enabledGames: parseEnabledGames(parsed.enabledGames, defaults.enabledGames),
     };
   } catch {
     return null;
@@ -832,6 +855,12 @@ export function campaignFromRow(row: TenantSettingsRow): CampaignSettings {
       ? parsePrizes(extra.wheelPrizes)
       : defaults.wheelPrizes,
     talkCategories: parseTalkCategories(row.conversation_cards),
+    enabledGames: parseEnabledGames(
+      "enabled_games" in row && row.enabled_games != null
+        ? row.enabled_games
+        : extra.enabledGames,
+      defaults.enabledGames,
+    ),
     revision: row.updated_at,
   };
 }
@@ -865,6 +894,7 @@ export function campaignToRow(settings: CampaignSettings): Omit<TenantSettingsRo
     category: settings.category,
     hero_title: settings.heroTitle,
     hero_subtitle: settings.heroSubtitle,
+    enabled_games: settings.enabledGames,
     products: [
       ...settings.products.map((product) => {
         const tastingNotes = (product.tastingNotes ?? [])
@@ -897,6 +927,7 @@ export function campaignToRow(settings: CampaignSettings): Omit<TenantSettingsRo
         themeConfig,
         wheelPrizes: settings.wheelPrizes,
         adminPassword: settings.adminPassword.trim(),
+        enabledGames: settings.enabledGames,
       },
     ],
     updated_at: new Date().toISOString(),

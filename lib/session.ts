@@ -153,26 +153,24 @@ export function loadSession(): PersistedSession | null {
 function sanitizeLoadedSession(loaded: PersistedSession | null): PersistedSession {
   if (!loaded) return emptySession();
 
-  if (loaded.reward && !isActiveReward(loaded.reward)) {
-    return emptySession();
-  }
-
-  if (!loaded.reward && loaded.step === "reward") {
-    return emptySession();
-  }
-
   const talkIndex = Number.isInteger(loaded.talkIndex)
     ? Math.max(0, loaded.talkIndex as number)
     : 0;
   const talkStep =
     loaded.step === "talk-play" && !loaded.talkCategoryId ? "talk-pick" : loaded.step;
   const restoredStep =
-    loaded.step === "reward" && loaded.reward
-      ? "reward"
-      : loaded.step === "game"
-        ? loaded.experience === "talk"
+    loaded.step === "reward" || loaded.step === "game"
+      ? loaded.experience === "talk"
+        ? loaded.talkCategoryId
           ? "talk-play"
-          : "match"
+          : "talk-pick"
+        : loaded.recipeId
+          ? "match"
+          : "landing"
+      : talkStep === "reward"
+        ? loaded.recipeId
+          ? "match"
+          : "landing"
         : talkStep;
 
   return {
@@ -218,10 +216,6 @@ export function getClientSession(): PersistedSession {
 
   const loaded = loadSession();
   const sanitized = sanitizeLoadedSession(loaded);
-
-  if (loaded?.reward && !isActiveReward(loaded.reward)) {
-    discardStaleStorage();
-  }
 
   memory = sanitized;
   return memory;
@@ -303,12 +297,13 @@ export function formatRewardCode(code: string): string {
 }
 
 export function resolveRestoredStep(session: PersistedSession): FlowStep {
-  if (isActiveReward(session.reward)) return "reward";
   if (session.step === "game") {
     return session.experience === "talk" ? "talk-play" : "match";
   }
-  if (session.step === "reward" && !isActiveReward(session.reward)) return "landing";
-  return session.step === "reward" ? "landing" : session.step;
+  if (session.step === "reward") {
+    return session.recipeId ? "match" : "landing";
+  }
+  return session.step;
 }
 
 export function canRestartAfterReward(

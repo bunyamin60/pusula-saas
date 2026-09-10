@@ -1,26 +1,25 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useParams } from "next/navigation";
+import { AnimatePresence } from "framer-motion";
 import { CoffeeLoader } from "@/components/CoffeeLoader";
 import { Compass } from "@/components/Compass";
+import { DuelProvider } from "@/components/DuelProvider";
 import { Landing } from "@/components/Landing";
 import { MatchReveal } from "@/components/MatchReveal";
+import { PerkDrawer } from "@/components/PerkDrawer";
 import { TalkDeck } from "@/components/TalkDeck";
 import { TalkPick } from "@/components/TalkPick";
-import { RewardCard } from "@/components/RewardCard";
 import { BrandWordmark } from "@/components/BrandWordmark";
 import { type Recipe } from "@/config/tenant.config";
 import { getRecipeById } from "@/lib/matchRecipe";
-import { getCampaignSettings } from "@/lib/campaignState";
+import { getActiveTenantId, getCampaignSettings } from "@/lib/campaignState";
 import { useCampaign } from "@/lib/useCampaign";
 import {
-  createReward,
   getClientSession,
   getServerSession,
-  isActiveReward,
-  resetSession,
   subscribeToSession,
-  unlockReward,
   updateSession,
 } from "@/lib/session";
 
@@ -29,12 +28,15 @@ const SPLASH_FADE_MS = 380;
 
 export default function TenantHome() {
   const campaign = useCampaign();
+  const params = useParams<{ tenant?: string }>();
+  const tenantId = params.tenant ?? getActiveTenantId();
   const session = useSyncExternalStore(
     subscribeToSession,
     getClientSession,
     getServerSession,
   );
   const [splash, setSplash] = useState<"in" | "out" | "done">("in");
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
   useEffect(() => {
     const hide = window.setTimeout(() => setSplash("out"), SPLASH_MS);
@@ -120,39 +122,9 @@ export default function TenantHome() {
     [],
   );
 
-  const claimPerk = useCallback(() => {
+  const openPerk = useCallback(() => {
     if (!getCampaignSettings().active) return;
-    const current = getClientSession();
-    if (isActiveReward(current.reward)) {
-      updateSession({ step: "reward" });
-      return;
-    }
-    const recipe = getRecipeById(current.recipeId);
-    const currentCampaign = getCampaignSettings();
-    updateSession({
-      reward: createReward({
-        id: recipe?.id ?? "perk",
-        label: recipe?.name ?? currentCampaign.hook,
-        caption: currentCampaign.hook,
-      }),
-      step: "reward",
-    });
-  }, []);
-
-  const unlockPerk = useCallback(() => {
-    const current = getClientSession();
-    if (!current.reward) return;
-    updateSession({
-      reward: unlockReward(current.reward),
-    });
-  }, []);
-
-  const redeem = useCallback(() => {
-    const current = getClientSession();
-    if (!current.reward) return;
-    updateSession({
-      reward: { ...current.reward, usedAt: Date.now() },
-    });
+    setIsDrawerOpen(true);
   }, []);
 
   if (!session) {
@@ -168,33 +140,23 @@ export default function TenantHome() {
       ? session.experience === "talk"
         ? "talk-play"
         : "match"
-      : session.step;
-  const step =
-    rawStep === "reward" &&
-    session.reward &&
-    (isActiveReward(session.reward) || session.reward.usedAt)
-      ? "reward"
-      : rawStep === "reward"
-        ? "landing"
-        : rawStep;
+      : session.step === "reward"
+        ? session.recipeId
+          ? "match"
+          : "landing"
+        : session.step;
+  const step = rawStep;
   const recipe = getRecipeById(session.recipeId);
 
   const locked = step === "talk-play";
 
   return (
+    <DuelProvider tenantId={tenantId}>
     <Shell locked={locked}>
       {splash !== "done" ? <CoffeeLoader fading={splash === "out"} /> : null}
       {step !== "landing" && <BrandWordmark compact home />}
       {step === "landing" && (
-        <Landing
-          onStartCompass={startCompass}
-          onStartTalk={startTalk}
-          onOpenReward={
-            isActiveReward(session.reward)
-              ? () => updateSession({ step: "reward" })
-              : undefined
-          }
-        />
+        <Landing onStartCompass={startCompass} onStartTalk={startTalk} />
       )}
       {step === "compass" && (
         <Compass
@@ -209,7 +171,7 @@ export default function TenantHome() {
       {step === "match" && recipe && (
         <MatchReveal
           recipe={recipe}
-          onPlay={claimPerk}
+          onPlay={openPerk}
           onBackToLast={backToLastQuestion}
           onRestartCompass={resetQuiz}
         />
@@ -255,20 +217,21 @@ export default function TenantHome() {
               talkIndex: 0,
             })
           }
-          onClaim={claimPerk}
+          onClaim={openPerk}
         />
       )}
-      {step === "reward" && session.reward && (
-        <RewardCard
-          reward={session.reward}
-          onUnlock={unlockPerk}
-          onRedeem={redeem}
-          onRestart={resetSession}
-          onHome={goHome}
-        />
-      )}
+      <AnimatePresence>
+        {isDrawerOpen ? (
+          <PerkDrawer
+            key="perk-drawer"
+            productName={recipe?.name}
+            onClose={() => setIsDrawerOpen(false)}
+          />
+        ) : null}
+      </AnimatePresence>
       <span className="sr-only">{campaign.brandName}</span>
     </Shell>
+    </DuelProvider>
   );
 }
 

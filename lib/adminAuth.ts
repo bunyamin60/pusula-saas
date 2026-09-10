@@ -9,6 +9,18 @@ function emit() {
   listeners.forEach((listener) => listener());
 }
 
+export function adminAuthStorageKey(tenantId: string): string {
+  return `admin_auth_${tenantId}`;
+}
+
+export function readStoredAdminAuth(tenantId: string): boolean {
+  try {
+    return sessionStorage.getItem(adminAuthStorageKey(tenantId)) === "true";
+  } catch {
+    return false;
+  }
+}
+
 export function subscribeToAdminAuth(listener: Listener): () => void {
   listeners.add(listener);
   return () => {
@@ -24,13 +36,22 @@ export function getServerAdminAuth(): boolean {
   return false;
 }
 
-export function setAdminAuth(next: boolean): void {
+export function setAdminAuth(next: boolean, tenantId?: string): void {
   unlocked = next;
+  if (tenantId) {
+    try {
+      const key = adminAuthStorageKey(tenantId);
+      if (next) sessionStorage.setItem(key, "true");
+      else sessionStorage.removeItem(key);
+    } catch {
+      // Private mode may block sessionStorage; in-memory flag still applies.
+    }
+  }
   emit();
 }
 
-export function lockAdmin(): void {
-  setAdminAuth(false);
+export function lockAdmin(tenantId?: string): void {
+  setAdminAuth(false, tenantId);
 }
 
 export function adminPasswordAccepted(

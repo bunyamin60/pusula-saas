@@ -1,47 +1,43 @@
 "use client";
 
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useParams } from "next/navigation";
 import { AdminLogin } from "@/components/AdminLogin";
 import { CampaignForm } from "@/components/CampaignForm";
 import {
   getServerAdminAuth,
   getAdminAuth,
   lockAdmin,
+  readStoredAdminAuth,
   setAdminAuth,
   subscribeToAdminAuth,
 } from "@/lib/adminAuth";
-import { resetCampaign, saveCampaign } from "@/lib/campaignState";
+import { getActiveTenantId, resetCampaign, saveCampaign } from "@/lib/campaignState";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant";
 import { useCampaign } from "@/lib/useCampaign";
 
 export default function TenantAdminPage() {
+  const params = useParams<{ tenant?: string }>();
+  const tenantId = params.tenant ?? getActiveTenantId() ?? DEFAULT_TENANT_ID;
   const authed = useSyncExternalStore(
     subscribeToAdminAuth,
     getAdminAuth,
     getServerAdminAuth,
   );
   const campaign = useCampaign();
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    lockAdmin();
+    if (readStoredAdminAuth(tenantId)) setAdminAuth(true);
+    setReady(true);
+  }, [tenantId]);
 
-    const onPageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) lockAdmin();
-    };
-    const onHide = () => lockAdmin();
+  const login = useCallback(() => setAdminAuth(true, tenantId), [tenantId]);
+  const logout = useCallback(() => lockAdmin(tenantId), [tenantId]);
 
-    window.addEventListener("pageshow", onPageShow);
-    window.addEventListener("pagehide", onHide);
-    window.addEventListener("beforeunload", onHide);
-    return () => {
-      lockAdmin();
-      window.removeEventListener("pageshow", onPageShow);
-      window.removeEventListener("pagehide", onHide);
-      window.removeEventListener("beforeunload", onHide);
-    };
-  }, []);
-
-  const login = useCallback(() => setAdminAuth(true), []);
-  const logout = useCallback(() => lockAdmin(), []);
+  if (!ready) {
+    return <main className="min-h-dvh bg-background" />;
+  }
 
   if (!authed) {
     return (

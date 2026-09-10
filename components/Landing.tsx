@@ -1,7 +1,12 @@
 "use client";
 
+import { useState } from "react";
+import { AnimatePresence } from "framer-motion";
 import { BrandWordmark } from "@/components/BrandWordmark";
 import { SocialLinks } from "@/components/SocialLinks";
+import { DeviceTestReset } from "@/components/DeviceTestReset";
+import { DuelLobbyDrawer } from "@/components/DuelLobby";
+import { useDuel } from "@/components/DuelProvider";
 import { tenantConfig } from "@/config/tenant.config";
 import {
   compassTitleOf,
@@ -18,10 +23,19 @@ type LandingProps = {
 
 export function Landing({ onStartCompass, onStartTalk, onOpenReward }: LandingProps) {
   const defaults = tenantConfig.copy.landing;
+  const duelCopy = tenantConfig.copy.duel;
   const campaign = useCampaign();
   const lounge = isLoungeVenue({ category: campaign.category });
   const compassTitle = compassTitleOf(campaign.category);
   const { kicker, greeting, accent, subhead } = resolveLandingCopy(campaign);
+  const { ready: duelReady, inMatch } = useDuel();
+  const [isDuelOpen, setIsDuelOpen] = useState(false);
+  const [wasInMatch, setWasInMatch] = useState(inMatch);
+
+  if (inMatch !== wasInMatch) {
+    setWasInMatch(inMatch);
+    if (inMatch) setIsDuelOpen(false);
+  }
 
   return (
     <section className="flex flex-1 flex-col">
@@ -64,11 +78,11 @@ export function Landing({ onStartCompass, onStartTalk, onOpenReward }: LandingPr
           {defaults.chooseLead}
         </p>
 
-        <div className="grid gap-3">
+        <div className="space-y-3">
           <button
             type="button"
             onClick={onStartCompass}
-            className="flex min-h-[5.75rem] items-start gap-3 rounded-2xl bg-primary px-4 py-4 text-left text-on-primary shadow-lift transition-transform active:scale-[0.99]"
+            className="flex min-h-[5.75rem] w-full items-start gap-3 rounded-2xl bg-primary px-4 py-4 text-left text-on-primary shadow-lift transition-transform active:scale-[0.99]"
           >
             <span className="mt-0.5 flex shrink-0 items-center justify-center" aria-hidden>
               {lounge ? (
@@ -103,23 +117,43 @@ export function Landing({ onStartCompass, onStartTalk, onOpenReward }: LandingPr
               </span>
             </span>
           </button>
-          <button
-            type="button"
-            onClick={onStartTalk}
-            className="flex min-h-[5.75rem] items-start gap-3 rounded-2xl bg-surface px-4 py-4 text-left shadow-sm transition-transform active:scale-[0.99]"
-          >
-            <span className="mt-0.5 text-2xl" aria-hidden>
-              {defaults.talkIcon}
-            </span>
-            <span className="min-w-0">
-              <span className="block font-display text-xl leading-tight text-ink">
+
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={onStartTalk}
+              className={`flex min-h-[6rem] flex-col items-start gap-1 rounded-2xl bg-surface px-3.5 py-3.5 text-left shadow-sm transition-transform active:scale-[0.99] ${
+                duelReady ? "" : "col-span-2"
+              }`}
+            >
+              <span className="text-2xl" aria-hidden>
+                {defaults.talkIcon}
+              </span>
+              <span className="font-display text-base leading-tight text-ink">
                 {defaults.talkTitle}
               </span>
-              <span className="mt-1 block text-sm leading-snug text-muted">
+              <span className="line-clamp-2 text-[11px] leading-snug text-muted">
                 {defaults.talkCaption}
               </span>
-            </span>
-          </button>
+            </button>
+            {duelReady ? (
+              <button
+                type="button"
+                onClick={() => setIsDuelOpen(true)}
+                className="relative flex min-h-[6rem] flex-col items-start gap-1 rounded-2xl bg-surface px-3.5 py-3.5 text-left shadow-sm transition-transform active:scale-[0.99]"
+              >
+                <span className="absolute right-3 top-3 rounded-full bg-red-500 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-white">
+                  {duelCopy.liveBadge}
+                </span>
+                <span className="text-2xl" aria-hidden>
+                  {defaults.duelIcon}
+                </span>
+                <span className="font-display text-base leading-tight text-ink">
+                  {defaults.duelTitle}
+                </span>
+              </button>
+            ) : null}
+          </div>
         </div>
 
         <SocialLinks variant="landing" />
@@ -127,7 +161,14 @@ export function Landing({ onStartCompass, onStartTalk, onOpenReward }: LandingPr
         <p className="text-center text-xs tracking-wide text-muted">
           {defaults.footnote}
         </p>
+        <DeviceTestReset />
       </div>
+
+      <AnimatePresence>
+        {isDuelOpen ? (
+          <DuelLobbyDrawer onClose={() => setIsDuelOpen(false)} />
+        ) : null}
+      </AnimatePresence>
     </section>
   );
 }

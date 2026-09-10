@@ -1,12 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { RotateCcw } from "lucide-react";
+import { MapPin, RotateCcw } from "lucide-react";
 import { ExperienceBack } from "@/components/ExperienceBack";
 import { HookahAnimation } from "@/components/HookahAnimation";
+import { InstagramIcon } from "@/components/SocialLinks";
+import { DeviceTestReset } from "@/components/DeviceTestReset";
+import { DuelExperience } from "@/components/DuelLobby";
 import { tenantConfig, type Recipe } from "@/config/tenant.config";
-import { isLoungeVenue, matchAsideLine } from "@/lib/landingCopy";
+import { logQuizCompleteOnce } from "@/lib/analytics";
+import { getActiveTenantId } from "@/lib/campaignState";
+import { isLoungeVenue, matchAsideLine, resolveTenantCategory } from "@/lib/landingCopy";
 import { useCampaign } from "@/lib/useCampaign";
+import { useParams } from "next/navigation";
 
 type MatchRevealProps = {
   recipe: Recipe;
@@ -23,11 +29,20 @@ export function MatchReveal({
 }: MatchRevealProps) {
   const copy = tenantConfig.copy.match;
   const campaign = useCampaign();
-  const cta = campaign.ctaText || copy.cta;
+  const params = useParams<{ tenant?: string }>();
+  const tenantId = params.tenant ?? getActiveTenantId();
   const tagline = recipe.tagline || recipe.originNote;
   const tastingNotes = recipe.tastingNotes ?? recipe.notes;
   const lounge = isLoungeVenue({ category: campaign.category });
   const aside = matchAsideLine(campaign.brandName, campaign.category);
+  const category = resolveTenantCategory(campaign.category);
+  const perkConditions = tenantConfig.copy.match.perkConditionByCategory as Record<
+    string,
+    string
+  >;
+  const perkCondition =
+    perkConditions[category] ?? perkConditions.lounge ?? perkConditions.general;
+  const cta = tenantConfig.copy.match.ctaOrder;
   const [leaving, setLeaving] = useState(false);
   const leaveTimer = useRef<number | null>(null);
 
@@ -36,6 +51,10 @@ export function MatchReveal({
       if (leaveTimer.current) window.clearTimeout(leaveTimer.current);
     };
   }, []);
+
+  useEffect(() => {
+    logQuizCompleteOnce(tenantId, recipe.name);
+  }, [recipe.name, tenantId]);
 
   function leaveTo(next: () => void) {
     if (leaving) return;
@@ -99,6 +118,12 @@ export function MatchReveal({
         </button>
       </article>
 
+      {campaign.active && perkCondition ? (
+        <p className="mt-4 rounded-2xl bg-surface px-4 py-3 text-center text-sm leading-relaxed text-ink">
+          🎁 {copy.perkBadge}: {perkCondition}
+        </p>
+      ) : null}
+
       {tastingNotes.length > 0 ? (
       <div className="mt-6">
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
@@ -131,9 +156,57 @@ export function MatchReveal({
             {copy.inactiveNote}
           </p>
         )}
+        <DuelExperience />
+        <MatchSocialIcons
+          instagramUrl={campaign.instagramUrl || tenantConfig.reward.instagramUrl}
+          mapsUrl={campaign.googleReviewUrl || tenantConfig.reward.googleReviewUrl}
+          instagramLabel={copy.socialInstagram}
+          mapsLabel={copy.socialMaps}
+        />
+        <DeviceTestReset />
       </div>
       </div>
     </section>
+  );
+}
+
+function MatchSocialIcons({
+  instagramUrl,
+  mapsUrl,
+  instagramLabel,
+  mapsLabel,
+}: {
+  instagramUrl?: string;
+  mapsUrl?: string;
+  instagramLabel: string;
+  mapsLabel: string;
+}) {
+  if (!instagramUrl && !mapsUrl) return null;
+  return (
+    <div className="flex items-center justify-center gap-2.5 pt-2">
+      {instagramUrl ? (
+        <a
+          href={instagramUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={instagramLabel}
+          className="flex size-9 items-center justify-center rounded-full bg-surface text-muted transition-colors hover:bg-primary/10 hover:text-primary"
+        >
+          <InstagramIcon className="size-4" />
+        </a>
+      ) : null}
+      {mapsUrl ? (
+        <a
+          href={mapsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={mapsLabel}
+          className="flex size-9 items-center justify-center rounded-full bg-surface text-muted transition-colors hover:bg-primary/10 hover:text-primary"
+        >
+          <MapPin className="size-4" />
+        </a>
+      ) : null}
+    </div>
   );
 }
 
