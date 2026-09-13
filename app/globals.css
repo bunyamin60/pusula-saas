@@ -660,6 +660,26 @@ body {
   }
 }
 
+@keyframes draw-wait-sway {
+  0%,
+  100% {
+    transform: rotate(-10deg) translateY(0);
+  }
+  50% {
+    transform: rotate(10deg) translateY(-6px);
+  }
+}
+
+.draw-wait-icon {
+  display: inline-block;
+  transform-origin: 50% 85%;
+  animation: draw-wait-sway 1.15s ease-in-out infinite;
+}
+
+.pb-safe {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
 .talk-stage {
   touch-action: pan-x;
   overscroll-behavior: none;
@@ -709,6 +729,7 @@ body {
   .coffee-loader-vapour span,
   .hookah-smoke span,
   .wheel-confetti,
+  .draw-wait-icon,
   .lock-pulse,
   .talk-card,
   .talk-card-out-left,

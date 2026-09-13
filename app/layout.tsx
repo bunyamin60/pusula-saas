@@ -36,6 +36,7 @@ export const viewport: Viewport = {
   userScalable: false,
   themeColor: tenantConfig.theme.primary,
   viewportFit: "cover",
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

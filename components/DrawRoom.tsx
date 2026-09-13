@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { motion } from "framer-motion";
 import { AlertTriangle, Eraser, Send, Undo2, Volume2, VolumeX, X } from "lucide-react";
 import { DrawCanvas } from "@/components/DrawCanvas";
 import { tenantConfig } from "@/config/tenant.config";
@@ -36,7 +37,7 @@ import {
   type DrawStroke,
 } from "@/lib/drawGame";
 import { useDuelClock, type DuelPlayer } from "@/lib/duel";
-import { getSupabase, isRealtimeJoined, wakeRealtime } from "@/lib/supabase";
+import { getSupabase, wakeRealtime } from "@/lib/supabase";
 
 type DrawRoomProps = {
   roomId: string;
@@ -102,6 +103,11 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
 
   const send = useCallback((event: string, payload: Record<string, unknown>) => {
     void channelRef.current?.send({ type: "broadcast", event, payload });
+  }, []);
+
+  const reconnectChannel = useCallback(() => {
+    wakeRealtime();
+    setSocketEpoch((value) => value + 1);
   }, []);
 
   useEffect(() => {
@@ -515,40 +521,41 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
   }, [copy.kicked, player.clientId, roomId, socketEpoch, supabase]);
 
   useEffect(() => {
-    function resume() {
+    function handleVisibility() {
       if (document.visibilityState === "hidden") return;
-      wakeRealtime();
-      if (isRealtimeJoined(channelRef.current)) {
-        const current = playerRef.current;
-        void channelRef.current?.track({
-          clientId: current.clientId,
-          nickname: current.nickname,
-          avatar: current.avatar,
-        });
+      const channel = channelRef.current;
+      if (!channel || channel.state !== "joined") {
+        reconnectChannel();
         return;
       }
-      setSocketEpoch((value) => value + 1);
+      wakeRealtime();
+      const current = playerRef.current;
+      void channel.track({
+        clientId: current.clientId,
+        nickname: current.nickname,
+        avatar: current.avatar,
+      });
     }
 
     function onPageShow(event: PageTransitionEvent) {
       if (event.persisted) {
-        setSocketEpoch((value) => value + 1);
+        reconnectChannel();
         return;
       }
-      resume();
+      handleVisibility();
     }
 
-    document.addEventListener("visibilitychange", resume);
-    window.addEventListener("focus", resume);
-    window.addEventListener("online", resume);
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleVisibility);
+    window.addEventListener("online", handleVisibility);
     window.addEventListener("pageshow", onPageShow);
     return () => {
-      document.removeEventListener("visibilitychange", resume);
-      window.removeEventListener("focus", resume);
-      window.removeEventListener("online", resume);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleVisibility);
+      window.removeEventListener("online", handleVisibility);
       window.removeEventListener("pageshow", onPageShow);
     };
-  }, []);
+  }, [reconnectChannel]);
 
   useEffect(() => {
     if (!connected) return;
@@ -645,10 +652,15 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
             ? DRAW_REVEAL_MS
             : 1;
 
+  const waitSeconds = Math.max(0, Math.ceil(remaining / 1000));
+  const showBoard =
+    connected &&
+    (round.phase === "draw" || (round.phase === "warn" && !isPainter));
+
   return (
     <div className="fixed inset-0 z-[80] flex justify-center bg-background">
-      <div className="relative flex h-dvh w-full max-w-md flex-col overflow-hidden px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <header className="flex items-center gap-2">
+      <div className="relative flex h-[100dvh] max-h-[100dvh] w-full max-w-md flex-col overflow-hidden px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-safe">
+        <header className="flex shrink-0 items-center gap-2">
           <div className="min-w-0 flex-1">
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
               {isCafe ? copy.publicRoomBadge : copy.roomCode.replace("{pin}", pin ?? "")}
@@ -671,7 +683,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
         </header>
 
         {round.phase !== "lobby" ? (
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface">
+          <div className="mt-2 h-1.5 shrink-0 overflow-hidden rounded-full bg-surface">
             <div
               className="h-full rounded-full bg-primary transition-[width] duration-100"
               style={{ width: `${Math.min(100, (remaining / totalMs) * 100)}%` }}
@@ -679,24 +691,25 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
           </div>
         ) : null}
 
-        <main className="mt-3 flex min-h-0 flex-1 flex-col">
+        <main className="mt-2 flex min-h-0 flex-1 flex-col">
           {!connected ? (
-            <p className="m-auto text-sm font-medium text-muted">
-              {supabase ? copy.connecting : copy.unavailable}
-            </p>
+            <WaitPulse title={supabase ? copy.connecting : copy.unavailable} />
           ) : round.phase === "lobby" ? (
             <div className="m-auto w-full px-2 text-center">
+              <span className="draw-wait-icon text-5xl" aria-hidden>
+                ☕
+              </span>
               {!isCafe && pin ? (
                 <>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">
+                  <p className="mt-4 text-[10px] font-bold uppercase tracking-[0.18em] text-primary">
                     {copy.sharePin}
                   </p>
-                  <p className="mt-3 font-display text-5xl tracking-[0.22em] text-ink">
+                  <p className="mt-2 font-display text-5xl tracking-[0.22em] text-ink">
                     {pin}
                   </p>
                 </>
               ) : (
-                <p className="font-display text-2xl text-ink">{copy.publicRoomBadge}</p>
+                <p className="mt-4 font-display text-2xl text-ink">{copy.publicRoomBadge}</p>
               )}
               <p className="mt-4 text-sm font-medium tracking-wide text-muted">
                 {copy.waitingPlayers}
@@ -720,18 +733,28 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
               ))}
             </div>
           ) : round.phase === "pick" ? (
-            <p className="m-auto text-sm font-medium text-muted">
-              {copy.pickSeconds.replace(
-                "{seconds}",
-                String(Math.max(0, Math.ceil(remaining / 1000))),
-              )}
-            </p>
-          ) : round.phase === "warn" ? (
-            <div className="m-auto rounded-2xl bg-red-500/10 px-6 py-8 text-center">
+            <WaitPulse
+              title={copy.nextPainter}
+              detail={
+                waitSeconds > 0
+                  ? copy.pickSeconds.replace("{seconds}", String(waitSeconds))
+                  : undefined
+              }
+            />
+          ) : round.phase === "warn" && isPainter ? (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="m-auto rounded-2xl bg-red-500/10 px-6 py-8 text-center"
+            >
               <p className="font-display text-2xl leading-snug text-ink">{copy.warnTitle}</p>
-            </div>
+            </motion.div>
           ) : round.phase === "reveal" ? (
-            <div className="m-auto w-full text-center">
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="m-auto flex w-full flex-col items-center text-center"
+            >
               <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">
                 {copy.intermission}
               </p>
@@ -746,7 +769,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                       String(round.correctIds.length),
                     )}
               </p>
-              <ol className="mt-5 space-y-1.5 text-left">
+              <ol className="mt-5 w-full space-y-1.5 text-left">
                 {ranked.map((entry, index) => (
                   <li
                     key={entry.clientId}
@@ -761,26 +784,24 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                   </li>
                 ))}
               </ol>
-            </div>
-          ) : (
+            </motion.div>
+          ) : showBoard ? (
             <>
-              <div className="relative min-h-0 flex-1">
-                {isPainter ? (
-                  <p className="mb-2 rounded-xl bg-primary/10 px-3 py-2 text-center text-sm font-medium text-ink">
-                    {copy.secretWord.replace("{word}", round.word ?? "")}
-                  </p>
-                ) : (
-                  <p className="mb-2 text-center text-xs font-medium uppercase tracking-[0.14em] text-muted">
-                    {copy.guesser}
-                  </p>
-                )}
-                <div className="relative h-[42vh] min-h-[220px] overflow-hidden rounded-2xl border border-primary/15">
+              {isPainter ? (
+                <p className="mb-2 shrink-0 rounded-xl bg-primary/10 px-3 py-2 text-center text-sm font-medium text-ink">
+                  {copy.secretWord.replace("{word}", round.word ?? "")}
+                </p>
+              ) : (
+                <p className="mb-2 shrink-0 text-center text-xs font-medium uppercase tracking-[0.14em] text-muted">
+                  {round.phase === "warn" ? copy.painterPreparing : copy.guesser}
+                </p>
+              )}
+              <div className="flex min-h-0 flex-1 items-center justify-center">
+                <div className="relative aspect-square h-full max-h-full w-auto max-w-full overflow-hidden rounded-2xl border border-primary/15">
                   {!isPainter ? (
                     <button
                       type="button"
-                      onClick={() =>
-                        setVotePrompt(round.painterId)
-                      }
+                      onClick={() => setVotePrompt(round.painterId)}
                       className="absolute left-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-white/90 text-amber-600 shadow-sm"
                     >
                       <AlertTriangle className="size-4" />
@@ -794,134 +815,134 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                     onStroke={onStroke}
                   />
                 </div>
-                {isPainter && round.phase === "draw" ? (
-                  <div className="mt-2 flex items-center gap-2">
-                    {drawConfig.colors.map((swatch) => (
-                      <button
-                        key={swatch.id}
-                        type="button"
-                        aria-label={swatch.id}
-                        onClick={() => setColor(swatch.hex)}
-                        className={`size-8 rounded-full border-2 ${
-                          color === swatch.hex ? "border-ink" : "border-transparent"
-                        }`}
-                        style={{ background: swatch.hex }}
-                      />
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => setBrush("thin")}
-                      className={`rounded-full px-2 py-1 text-[10px] font-medium ${
-                        brush === "thin" ? "bg-primary text-on-primary" : "bg-surface"
-                      }`}
-                    >
-                      {copy.thinBrush}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBrush("thick")}
-                      className={`rounded-full px-2 py-1 text-[10px] font-medium ${
-                        brush === "thick" ? "bg-primary text-on-primary" : "bg-surface"
-                      }`}
-                    >
-                      {copy.thickBrush}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={undoBoard}
-                      aria-label={copy.undo}
-                      className="ml-auto flex size-9 items-center justify-center rounded-full bg-surface"
-                    >
-                      <Undo2 className="size-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={clearBoard}
-                      aria-label={copy.clear}
-                      className="flex size-9 items-center justify-center rounded-full bg-surface"
-                    >
-                      <Eraser className="size-4" />
-                    </button>
-                  </div>
-                ) : null}
               </div>
-
-              <section className="mt-3 flex min-h-0 flex-1 flex-col">
-                <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted">
-                  {copy.chatTitle}
-                </p>
-                <ul
-                  ref={chatListRef}
-                  className="mt-1 max-h-28 space-y-1 overflow-y-auto"
-                >
-                  {chat.map((message) => {
-                    const isMuted = muted.includes(message.clientId);
-                    return (
-                      <li
-                        key={message.id}
-                        className={`flex items-start justify-between gap-2 rounded-xl px-2 py-1.5 text-xs ${
-                          !isMuted && message.kind === "correct"
-                            ? "bg-emerald-500/15 text-emerald-800"
-                            : "bg-surface text-ink"
-                        }`}
+              {isPainter ? (
+                <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2">
+                  {drawConfig.colors.map((swatch) => (
+                    <button
+                      key={swatch.id}
+                      type="button"
+                      aria-label={swatch.id}
+                      onClick={() => setColor(swatch.hex)}
+                      className={`size-8 rounded-full border-2 ${
+                        color === swatch.hex ? "border-ink" : "border-transparent"
+                      }`}
+                      style={{ background: swatch.hex }}
+                    />
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setBrush("thin")}
+                    className={`rounded-full px-2 py-1 text-[10px] font-medium ${
+                      brush === "thin" ? "bg-primary text-on-primary" : "bg-surface"
+                    }`}
+                  >
+                    {copy.thinBrush}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBrush("thick")}
+                    className={`rounded-full px-2 py-1 text-[10px] font-medium ${
+                      brush === "thick" ? "bg-primary text-on-primary" : "bg-surface"
+                    }`}
+                  >
+                    {copy.thickBrush}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={undoBoard}
+                    aria-label={copy.undo}
+                    className="ml-auto flex size-9 items-center justify-center rounded-full bg-surface"
+                  >
+                    <Undo2 className="size-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearBoard}
+                    aria-label={copy.clear}
+                    className="flex size-9 items-center justify-center rounded-full bg-surface"
+                  >
+                    <Eraser className="size-4" />
+                  </button>
+                </div>
+              ) : (
+                <section className="mt-2 flex h-[10.5rem] shrink-0 flex-col">
+                  <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted">
+                    {copy.chatTitle}
+                  </p>
+                  <ul
+                    ref={chatListRef}
+                    className="mt-1 min-h-0 flex-1 space-y-1 overflow-y-auto"
+                  >
+                    {chat.map((message) => {
+                      const isMuted = muted.includes(message.clientId);
+                      return (
+                        <li
+                          key={message.id}
+                          className={`flex items-start justify-between gap-2 rounded-xl px-2 py-1.5 text-xs ${
+                            !isMuted && message.kind === "correct"
+                              ? "bg-emerald-500/15 text-emerald-800"
+                              : "bg-surface text-ink"
+                          }`}
+                        >
+                          <span className={isMuted ? "italic text-muted" : undefined}>
+                            {isMuted
+                              ? `${message.nickname}`
+                              : message.kind === "correct"
+                                ? copy.correctBanner.replace("{nickname}", message.nickname)
+                                : `${message.avatar} ${message.nickname}: ${message.text}`}
+                          </span>
+                          {message.clientId !== player.clientId ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleMute(message.clientId)}
+                              aria-label={isMuted ? copy.unmute : copy.mute}
+                              className="shrink-0 text-muted"
+                            >
+                              {isMuted ? (
+                                <VolumeX className="size-3.5" />
+                              ) : (
+                                <Volume2 className="size-3.5" />
+                              )}
+                            </button>
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {round.phase === "draw" ? (
+                    alreadyCorrect ? (
+                      <p className="mt-2 text-center text-xs font-medium text-muted">
+                        {copy.lockedGuess}
+                      </p>
+                    ) : (
+                      <form
+                        className="mt-2 flex gap-2"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          submitGuess();
+                        }}
                       >
-                        <span className={isMuted ? "italic text-muted" : undefined}>
-                          {isMuted
-                            ? `${message.nickname}`
-                            : message.kind === "correct"
-                              ? copy.correctBanner.replace("{nickname}", message.nickname)
-                              : `${message.avatar} ${message.nickname}: ${message.text}`}
-                        </span>
-                        {message.clientId !== player.clientId ? (
-                          <button
-                            type="button"
-                            onClick={() => toggleMute(message.clientId)}
-                            aria-label={isMuted ? copy.unmute : copy.mute}
-                            className="shrink-0 text-muted"
-                          >
-                            {isMuted ? (
-                              <VolumeX className="size-3.5" />
-                            ) : (
-                              <Volume2 className="size-3.5" />
-                            )}
-                          </button>
-                        ) : null}
-                      </li>
-                    );
-                  })}
-                </ul>
-                {!isPainter && round.phase === "draw" ? (
-                  alreadyCorrect ? (
-                    <p className="mt-2 text-center text-xs font-medium text-muted">
-                      {copy.lockedGuess}
-                    </p>
-                  ) : (
-                    <form
-                      className="mt-2 flex gap-2"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        submitGuess();
-                      }}
-                    >
-                      <input
-                        value={guess}
-                        onChange={(event) => setGuess(event.target.value)}
-                        placeholder={copy.guessPlaceholder}
-                        className="field-input min-h-11 flex-1 text-sm"
-                      />
-                      <button
-                        type="submit"
-                        aria-label={copy.guessSend}
-                        className="btn-primary min-h-11 px-3"
-                      >
-                        <Send className="size-4" />
-                      </button>
-                    </form>
-                  )
-                ) : null}
-              </section>
+                        <input
+                          value={guess}
+                          onChange={(event) => setGuess(event.target.value)}
+                          placeholder={copy.guessPlaceholder}
+                          className="field-input min-h-11 flex-1 text-sm"
+                        />
+                        <button
+                          type="submit"
+                          aria-label={copy.guessSend}
+                          className="btn-primary min-h-11 px-3"
+                        >
+                          <Send className="size-4" />
+                        </button>
+                      </form>
+                    )
+                  ) : null}
+                </section>
+              )}
             </>
-          )}
+          ) : null}
         </main>
 
         {votePrompt ? (
@@ -961,6 +982,20 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
           </p>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function WaitPulse({ title, detail }: { title: string; detail?: string }) {
+  return (
+    <div className="m-auto flex flex-col items-center px-4 text-center">
+      <span className="draw-wait-icon text-5xl" aria-hidden>
+        ☕
+      </span>
+      <p className="mt-4 font-display text-xl leading-snug text-ink">{title}</p>
+      {detail ? (
+        <p className="mt-2 text-sm font-medium tracking-wide text-muted">{detail}</p>
+      ) : null}
     </div>
   );
 }
