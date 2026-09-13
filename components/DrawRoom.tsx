@@ -1,0 +1,966 @@
+"use client";
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { AlertTriangle, Eraser, Send, Undo2, Volume2, VolumeX, X } from "lucide-react";
+import { DrawCanvas } from "@/components/DrawCanvas";
+import { tenantConfig } from "@/config/tenant.config";
+import {
+  DRAW_MAX_SNAPSHOT_STROKES,
+  DRAW_MIN_PLAYERS,
+  DRAW_PAINTER_BONUS,
+  DRAW_PICK_MS,
+  DRAW_REVEAL_MS,
+  DRAW_TURN_MS,
+  DRAW_WARN_MS,
+  cafeDrawRoomId,
+  electDrawHost,
+  emptyDrawRound,
+  guessPointsForIndex,
+  isFuzzyMatch,
+  kickThreshold,
+  mergeStroke,
+  nextPainterId,
+  painterOrderOf,
+  pickDrawWords,
+  pinFromRoomId,
+  withOccupantScores,
+  type DrawChatMessage,
+  type DrawOccupant,
+  type DrawRoundState,
+  type DrawStroke,
+} from "@/lib/drawGame";
+import { useDuelClock, type DuelPlayer } from "@/lib/duel";
+import { getSupabase, isRealtimeJoined, wakeRealtime } from "@/lib/supabase";
+
+type DrawRoomProps = {
+  roomId: string;
+  tenantId: string;
+  player: DuelPlayer;
+  onExit: () => void;
+};
+
+type GuessPayload = {
+  clientId: string;
+  nickname: string;
+  avatar: string;
+  text: string;
+};
+
+type HostApi = {
+  chooseWord: (word: string) => void;
+  applyGuess: (payload: GuessPayload) => void;
+  applyVote: (targetId: string, fromId: string) => void;
+};
+
+type VoteTally = { targetId: string; votes: number; need: number };
+
+export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
+  const copy = tenantConfig.copy.duel.draw;
+  const drawConfig = tenantConfig.duel.draw;
+  const supabase = useMemo(() => getSupabase(), []);
+  const [connected, setConnected] = useState(false);
+  const [occupants, setOccupants] = useState<DrawOccupant[]>([]);
+  const [round, setRound] = useState<DrawRoundState>(emptyDrawRound);
+  const [strokes, setStrokes] = useState<DrawStroke[]>([]);
+  const [chat, setChat] = useState<DrawChatMessage[]>([]);
+  const [guess, setGuess] = useState("");
+  const [color, setColor] = useState<string>(drawConfig.colors[0].hex);
+  const [brush, setBrush] = useState<"thin" | "thick">("thin");
+  const [muted, setMuted] = useState<string[]>([]);
+  const [votePrompt, setVotePrompt] = useState<string | null>(null);
+  const [voteTally, setVoteTally] = useState<VoteTally | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [socketEpoch, setSocketEpoch] = useState(0);
+
+  const channelRef = useRef<ReturnType<NonNullable<typeof supabase>["channel"]> | null>(
+    null,
+  );
+  const occupantsRef = useRef<DrawOccupant[]>([]);
+  const roundRef = useRef<DrawRoundState>(emptyDrawRound());
+  const strokesRef = useRef<DrawStroke[]>([]);
+  const hostTimerRef = useRef<number | null>(null);
+  const votesRef = useRef<Record<string, string[]>>({});
+  const isHostRef = useRef(false);
+  const hostApiRef = useRef<HostApi | null>(null);
+  const onExitRef = useRef(onExit);
+  const playerRef = useRef(player);
+  const chatListRef = useRef<HTMLUListElement | null>(null);
+
+  useEffect(() => {
+    onExitRef.current = onExit;
+  }, [onExit]);
+
+  useEffect(() => {
+    playerRef.current = player;
+  }, [player]);
+
+  const send = useCallback((event: string, payload: Record<string, unknown>) => {
+    void channelRef.current?.send({ type: "broadcast", event, payload });
+  }, []);
+
+  useEffect(() => {
+    occupantsRef.current = occupants;
+  }, [occupants]);
+
+  useEffect(() => {
+    roundRef.current = round;
+  }, [round]);
+
+  useEffect(() => {
+    strokesRef.current = strokes;
+  }, [strokes]);
+
+  useEffect(() => {
+    const list = chatListRef.current;
+    if (!list) return;
+    const frame = window.requestAnimationFrame(() => {
+      list.scrollTop = list.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [chat]);
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    const channel = supabase.channel(roomId, {
+      config: {
+        broadcast: { self: false },
+        presence: { key: player.clientId },
+      },
+    });
+
+    function clearHostTimer() {
+      if (hostTimerRef.current != null) {
+        window.clearTimeout(hostTimerRef.current);
+        hostTimerRef.current = null;
+      }
+    }
+
+    function publishRound(next: DrawRoundState) {
+      roundRef.current = next;
+      setRound(next);
+      void channel.send({
+        type: "broadcast",
+        event: "round_state",
+        payload: next,
+      });
+    }
+
+    function publishChat(message: DrawChatMessage) {
+      setChat((current) => [...current.slice(-40), message]);
+      void channel.send({
+        type: "broadcast",
+        event: "chat",
+        payload: message,
+      });
+    }
+
+    function schedule(delay: number, action: () => void) {
+      clearHostTimer();
+      hostTimerRef.current = window.setTimeout(() => {
+        hostTimerRef.current = null;
+        if (!isHostRef.current) return;
+        action();
+      }, Math.max(0, delay));
+    }
+
+    function beginPick() {
+      const people = occupantsRef.current;
+      const scores = withOccupantScores(roundRef.current.scores, people);
+      if (people.length < DRAW_MIN_PLAYERS) {
+        clearHostTimer();
+        publishRound({
+          ...emptyDrawRound(),
+          scores,
+          round: roundRef.current.round,
+        });
+        return;
+      }
+      const order = painterOrderOf(people);
+      const painterId = nextPainterId(
+        order,
+        roundRef.current.painterId,
+        roundRef.current.painterOrder,
+      );
+      publishRound({
+        phase: "pick",
+        painterId,
+        options: pickDrawWords(3),
+        word: null,
+        endsAt: Date.now() + DRAW_PICK_MS,
+        scores,
+        correctIds: [],
+        round: roundRef.current.round + 1,
+        painterOrder: order,
+      });
+      votesRef.current = {};
+      setVoteTally(null);
+      void channel.send({ type: "broadcast", event: "canvas_clear", payload: {} });
+      setStrokes([]);
+      strokesRef.current = [];
+      schedule(DRAW_PICK_MS, autoPick);
+    }
+
+    function autoPick() {
+      const current = roundRef.current;
+      if (current.phase !== "pick") return;
+      chooseWord(current.options[0] ?? "");
+    }
+
+    function chooseWord(word: string) {
+      const current = roundRef.current;
+      if (current.phase !== "pick" || !word) return;
+      publishRound({
+        ...current,
+        phase: "warn",
+        word,
+        options: [],
+        endsAt: Date.now() + DRAW_WARN_MS,
+      });
+      schedule(DRAW_WARN_MS, beginDraw);
+    }
+
+    function beginDraw() {
+      const current = roundRef.current;
+      if (current.phase !== "warn") return;
+      publishRound({
+        ...current,
+        phase: "draw",
+        endsAt: Date.now() + DRAW_TURN_MS,
+      });
+      schedule(DRAW_TURN_MS, beginReveal);
+    }
+
+    function beginReveal() {
+      const current = roundRef.current;
+      if (current.phase !== "draw") return;
+      const scores = { ...current.scores };
+      if (current.painterId && current.correctIds.length > 0) {
+        scores[current.painterId] =
+          (scores[current.painterId] ?? 0) + DRAW_PAINTER_BONUS;
+      }
+      publishRound({
+        ...current,
+        phase: "reveal",
+        scores,
+        endsAt: Date.now() + DRAW_REVEAL_MS,
+      });
+      schedule(DRAW_REVEAL_MS, beginPick);
+    }
+
+    function maybeRevealEarly() {
+      const current = roundRef.current;
+      if (current.phase !== "draw" || !current.painterId) return;
+      const guessers = occupantsRef.current.filter(
+        (entry) => entry.clientId !== current.painterId,
+      );
+      if (
+        guessers.length > 0 &&
+        guessers.every((entry) => current.correctIds.includes(entry.clientId))
+      ) {
+        clearHostTimer();
+        beginReveal();
+      }
+    }
+
+    function applyGuess(payload: GuessPayload) {
+      if (!isHostRef.current) return;
+      const current = roundRef.current;
+      const occupant = occupantsRef.current.find(
+        (entry) => entry.clientId === payload.clientId,
+      );
+      if (!occupant) return;
+      const correct =
+        current.phase === "draw" &&
+        current.word != null &&
+        payload.clientId !== current.painterId &&
+        !current.correctIds.includes(payload.clientId) &&
+        isFuzzyMatch(payload.text, current.word);
+      if (correct) {
+        const points = guessPointsForIndex(current.correctIds.length);
+        publishRound({
+          ...current,
+          correctIds: [...current.correctIds, payload.clientId],
+          scores: {
+            ...current.scores,
+            [payload.clientId]: (current.scores[payload.clientId] ?? 0) + points,
+          },
+        });
+        publishChat({
+          id: `${payload.clientId}-${Date.now()}`,
+          kind: "correct",
+          clientId: payload.clientId,
+          nickname: payload.nickname,
+          avatar: payload.avatar,
+        });
+        maybeRevealEarly();
+        return;
+      }
+      if (current.phase !== "draw") return;
+      if (payload.clientId === current.painterId) return;
+      if (current.correctIds.includes(payload.clientId)) return;
+      publishChat({
+        id: `${payload.clientId}-${Date.now()}`,
+        kind: "wrong",
+        clientId: payload.clientId,
+        nickname: payload.nickname,
+        avatar: payload.avatar,
+        text: payload.text,
+      });
+    }
+
+    function applyVote(targetId: string, fromId: string) {
+      if (targetId === fromId) return;
+      const currentVotes = new Set(votesRef.current[targetId] ?? []);
+      currentVotes.add(fromId);
+      votesRef.current[targetId] = [...currentVotes];
+      const need = kickThreshold(occupantsRef.current.length);
+      const votes = currentVotes.size;
+      setVoteTally({ targetId, votes, need });
+      if (isHostRef.current && votes >= need) {
+        void channel.send({
+          type: "broadcast",
+          event: "kicked",
+          payload: { clientId: targetId },
+        });
+        if (targetId === player.clientId) {
+          setNotice(copy.kicked);
+          window.setTimeout(() => onExitRef.current(), 1400);
+        }
+      }
+    }
+
+    function refreshHost() {
+      const ids = occupantsRef.current.map((entry) => entry.clientId);
+      const hostId = electDrawHost(ids);
+      const nowHost = hostId === player.clientId;
+      const wasHost = isHostRef.current;
+      isHostRef.current = nowHost;
+      if (!nowHost) {
+        clearHostTimer();
+        return;
+      }
+      if (wasHost) return;
+      const current = roundRef.current;
+      if (current.phase === "lobby") return;
+      const remaining = current.endsAt - Date.now();
+      if (remaining <= 0) {
+        if (current.phase === "pick") autoPick();
+        else if (current.phase === "warn") beginDraw();
+        else if (current.phase === "draw") beginReveal();
+        else beginPick();
+        return;
+      }
+      if (current.phase === "pick") schedule(remaining, autoPick);
+      if (current.phase === "warn") schedule(remaining, beginDraw);
+      if (current.phase === "draw") schedule(remaining, beginReveal);
+      if (current.phase === "reveal") schedule(remaining, beginPick);
+    }
+
+    hostApiRef.current = { chooseWord, applyGuess, applyVote };
+
+    channel
+      .on("presence", { event: "sync" }, () => {
+        const state = channel.presenceState<DrawOccupant>();
+        const previousIds = new Set(occupantsRef.current.map((entry) => entry.clientId));
+        const next: DrawOccupant[] = [];
+        const seen = new Set<string>();
+        for (const entry of Object.values(state).flat()) {
+          if (!entry.clientId || seen.has(entry.clientId)) continue;
+          seen.add(entry.clientId);
+          next.push({
+            clientId: entry.clientId,
+            nickname: entry.nickname,
+            avatar: entry.avatar,
+          });
+        }
+        occupantsRef.current = next;
+        setOccupants(next);
+        refreshHost();
+        if (!isHostRef.current) return;
+
+        const painterGone =
+          roundRef.current.painterId != null &&
+          !next.some((entry) => entry.clientId === roundRef.current.painterId);
+        if (next.length < DRAW_MIN_PLAYERS && roundRef.current.phase !== "lobby") {
+          beginPick();
+        } else if (roundRef.current.phase === "lobby" && next.length >= DRAW_MIN_PLAYERS) {
+          beginPick();
+        } else if (painterGone && roundRef.current.phase !== "lobby") {
+          clearHostTimer();
+          beginPick();
+        }
+
+        const joined = next.some((entry) => !previousIds.has(entry.clientId));
+        if (joined) {
+          void channel.send({
+            type: "broadcast",
+            event: "canvas_snapshot",
+            payload: {
+              strokes: strokesRef.current.slice(-DRAW_MAX_SNAPSHOT_STROKES),
+              round: roundRef.current,
+            },
+          });
+        }
+      })
+      .on("broadcast", { event: "round_state" }, ({ payload }) => {
+        const next = payload as DrawRoundState;
+        roundRef.current = next;
+        setRound(next);
+        if (next.phase === "pick" || next.phase === "warn") {
+          setStrokes([]);
+          strokesRef.current = [];
+        }
+      })
+      .on("broadcast", { event: "draw_stroke" }, ({ payload }) => {
+        const stroke = payload as DrawStroke;
+        if (!stroke?.id || !Array.isArray(stroke.points)) return;
+        setStrokes((current) => {
+          const next = mergeStroke(current, {
+            ...stroke,
+            seq: stroke.seq ?? 0,
+          });
+          strokesRef.current = next;
+          return next;
+        });
+      })
+      .on("broadcast", { event: "canvas_clear" }, () => {
+        strokesRef.current = [];
+        setStrokes([]);
+      })
+      .on("broadcast", { event: "canvas_undo" }, () => {
+        setStrokes((current) => {
+          const next = current.slice(0, -1);
+          strokesRef.current = next;
+          return next;
+        });
+      })
+      .on("broadcast", { event: "canvas_snapshot" }, ({ payload }) => {
+        const snapshot = payload as { strokes?: DrawStroke[]; round?: DrawRoundState };
+        if (Array.isArray(snapshot.strokes) && strokesRef.current.length === 0) {
+          const restored = snapshot.strokes.map((stroke) => ({
+            ...stroke,
+            seq: stroke.seq ?? 0,
+          }));
+          strokesRef.current = restored;
+          setStrokes(restored);
+        }
+        if (snapshot.round && roundRef.current.phase === "lobby") {
+          roundRef.current = snapshot.round;
+          setRound(snapshot.round);
+        }
+      })
+      .on("broadcast", { event: "pick_word" }, ({ payload }) => {
+        const request = payload as { playerId?: string; word?: string };
+        const current = roundRef.current;
+        if (
+          current.phase !== "pick" ||
+          request.playerId !== current.painterId ||
+          !request.word ||
+          !current.options.includes(request.word)
+        ) {
+          return;
+        }
+        if (!isHostRef.current) return;
+        clearHostTimer();
+        chooseWord(request.word);
+      })
+      .on("broadcast", { event: "guess" }, ({ payload }) => {
+        applyGuess(payload as GuessPayload);
+      })
+      .on("broadcast", { event: "chat" }, ({ payload }) => {
+        const message = payload as DrawChatMessage;
+        setChat((current) => [...current.slice(-40), message]);
+      })
+      .on("broadcast", { event: "vote_kick" }, ({ payload }) => {
+        const vote = payload as { targetId: string; fromId: string };
+        applyVote(vote.targetId, vote.fromId);
+      })
+      .on("broadcast", { event: "kicked" }, ({ payload }) => {
+        const kicked = payload as { clientId: string };
+        if (kicked.clientId === player.clientId) {
+          setNotice(copy.kicked);
+          window.setTimeout(() => onExitRef.current(), 1400);
+        }
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          setConnected(true);
+          const current = playerRef.current;
+          void channel.track({
+            clientId: current.clientId,
+            nickname: current.nickname,
+            avatar: current.avatar,
+          });
+          return;
+        }
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          setConnected(false);
+        }
+      });
+
+    channelRef.current = channel;
+    return () => {
+      clearHostTimer();
+      hostApiRef.current = null;
+      channelRef.current = null;
+      void supabase.removeChannel(channel);
+    };
+  }, [copy.kicked, player.clientId, roomId, socketEpoch, supabase]);
+
+  useEffect(() => {
+    function resume() {
+      if (document.visibilityState === "hidden") return;
+      wakeRealtime();
+      if (isRealtimeJoined(channelRef.current)) {
+        const current = playerRef.current;
+        void channelRef.current?.track({
+          clientId: current.clientId,
+          nickname: current.nickname,
+          avatar: current.avatar,
+        });
+        return;
+      }
+      setSocketEpoch((value) => value + 1);
+    }
+
+    function onPageShow(event: PageTransitionEvent) {
+      if (event.persisted) {
+        setSocketEpoch((value) => value + 1);
+        return;
+      }
+      resume();
+    }
+
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("focus", resume);
+    window.addEventListener("online", resume);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("focus", resume);
+      window.removeEventListener("online", resume);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!connected) return;
+    void channelRef.current?.track({
+      clientId: player.clientId,
+      nickname: player.nickname,
+      avatar: player.avatar,
+    });
+  }, [connected, player.avatar, player.clientId, player.nickname]);
+
+  const brushWidth =
+    brush === "thin" ? drawConfig.brushes.thin : drawConfig.brushes.thick;
+  const painter =
+    occupants.find((entry) => entry.clientId === round.painterId) ?? null;
+  const isPainter = round.painterId === player.clientId;
+  const alreadyCorrect = round.correctIds.includes(player.clientId);
+  const now = useDuelClock(100);
+  const remaining = now && round.endsAt ? Math.max(0, round.endsAt - now) : 0;
+  const pin = pinFromRoomId(roomId);
+  const isCafe = roomId === cafeDrawRoomId(tenantId);
+
+  const ranked = [...occupants].sort(
+    (a, b) => (round.scores[b.clientId] ?? 0) - (round.scores[a.clientId] ?? 0),
+  );
+
+  function onStroke(stroke: DrawStroke) {
+    setStrokes((current) => {
+      const next = mergeStroke(current, stroke);
+      strokesRef.current = next;
+      return next;
+    });
+    send("draw_stroke", stroke);
+  }
+
+  function clearBoard() {
+    strokesRef.current = [];
+    setStrokes([]);
+    send("canvas_clear", {});
+  }
+
+  function undoBoard() {
+    setStrokes((current) => {
+      const next = current.slice(0, -1);
+      strokesRef.current = next;
+      return next;
+    });
+    send("canvas_undo", {});
+  }
+
+  function submitGuess() {
+    const text = guess.trim();
+    if (!text || isPainter || alreadyCorrect || round.phase !== "draw") return;
+    const payload: GuessPayload = {
+      clientId: player.clientId,
+      nickname: player.nickname,
+      avatar: player.avatar,
+      text,
+    };
+    setGuess("");
+    if (isHostRef.current) hostApiRef.current?.applyGuess(payload);
+    else send("guess", payload);
+  }
+
+  function pickWord(word: string) {
+    if (isHostRef.current) {
+      hostApiRef.current?.chooseWord(word);
+      return;
+    }
+    send("pick_word", { playerId: player.clientId, word });
+  }
+
+  function voteKick(targetId: string) {
+    hostApiRef.current?.applyVote(targetId, player.clientId);
+    send("vote_kick", { targetId, fromId: player.clientId });
+    setVotePrompt(null);
+  }
+
+  function toggleMute(clientId: string) {
+    setMuted((current) =>
+      current.includes(clientId)
+        ? current.filter((id) => id !== clientId)
+        : [...current, clientId],
+    );
+  }
+
+  const totalMs =
+    round.phase === "pick"
+      ? DRAW_PICK_MS
+      : round.phase === "warn"
+        ? DRAW_WARN_MS
+        : round.phase === "draw"
+          ? DRAW_TURN_MS
+          : round.phase === "reveal"
+            ? DRAW_REVEAL_MS
+            : 1;
+
+  return (
+    <div className="fixed inset-0 z-[80] flex justify-center bg-background">
+      <div className="relative flex h-dvh w-full max-w-md flex-col overflow-hidden px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <header className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
+              {isCafe ? copy.publicRoomBadge : copy.roomCode.replace("{pin}", pin ?? "")}
+            </p>
+            <h1 className="truncate font-display text-xl text-ink">{copy.title}</h1>
+          </div>
+          {painter && round.phase !== "lobby" ? (
+            <p className="shrink-0 text-xs font-medium text-muted">
+              {painter.avatar} {painter.nickname}
+            </p>
+          ) : null}
+          <button
+            type="button"
+            onClick={onExit}
+            aria-label={copy.leave}
+            className="flex size-10 items-center justify-center rounded-full bg-surface text-ink"
+          >
+            <X className="size-4" />
+          </button>
+        </header>
+
+        {round.phase !== "lobby" ? (
+          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface">
+            <div
+              className="h-full rounded-full bg-primary transition-[width] duration-100"
+              style={{ width: `${Math.min(100, (remaining / totalMs) * 100)}%` }}
+            />
+          </div>
+        ) : null}
+
+        <main className="mt-3 flex min-h-0 flex-1 flex-col">
+          {!connected ? (
+            <p className="m-auto text-sm font-medium text-muted">
+              {supabase ? copy.connecting : copy.unavailable}
+            </p>
+          ) : round.phase === "lobby" ? (
+            <div className="m-auto w-full px-2 text-center">
+              {!isCafe && pin ? (
+                <>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">
+                    {copy.sharePin}
+                  </p>
+                  <p className="mt-3 font-display text-5xl tracking-[0.22em] text-ink">
+                    {pin}
+                  </p>
+                </>
+              ) : (
+                <p className="font-display text-2xl text-ink">{copy.publicRoomBadge}</p>
+              )}
+              <p className="mt-4 text-sm font-medium tracking-wide text-muted">
+                {copy.waitingPlayers}
+              </p>
+              <p className="mt-2 text-xs font-medium tracking-wide text-muted">
+                {copy.insideCount.replace("{count}", String(occupants.length))}
+              </p>
+            </div>
+          ) : round.phase === "pick" && isPainter ? (
+            <div className="m-auto grid w-full gap-2">
+              <p className="text-center font-display text-xl text-ink">{copy.pickTitle}</p>
+              {round.options.map((word) => (
+                <button
+                  key={word}
+                  type="button"
+                  onClick={() => pickWord(word)}
+                  className="btn-secondary min-h-12"
+                >
+                  {word}
+                </button>
+              ))}
+            </div>
+          ) : round.phase === "pick" ? (
+            <p className="m-auto text-sm font-medium text-muted">
+              {copy.pickSeconds.replace(
+                "{seconds}",
+                String(Math.max(0, Math.ceil(remaining / 1000))),
+              )}
+            </p>
+          ) : round.phase === "warn" ? (
+            <div className="m-auto rounded-2xl bg-red-500/10 px-6 py-8 text-center">
+              <p className="font-display text-2xl leading-snug text-ink">{copy.warnTitle}</p>
+            </div>
+          ) : round.phase === "reveal" ? (
+            <div className="m-auto w-full text-center">
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">
+                {copy.intermission}
+              </p>
+              <p className="mt-2 font-display text-3xl text-ink">
+                {copy.wordWas.replace("{word}", round.word ?? "")}
+              </p>
+              <p className="mt-2 text-sm font-medium text-muted">
+                {round.correctIds.length === 0
+                  ? copy.nobodyGuessed
+                  : copy.guessedCount.replace(
+                      "{count}",
+                      String(round.correctIds.length),
+                    )}
+              </p>
+              <ol className="mt-5 space-y-1.5 text-left">
+                {ranked.map((entry, index) => (
+                  <li
+                    key={entry.clientId}
+                    className="flex items-center justify-between rounded-xl bg-surface px-3 py-2 text-sm"
+                  >
+                    <span>
+                      #{index + 1} {entry.avatar} {entry.nickname}
+                    </span>
+                    <span className="font-display text-primary">
+                      {round.scores[entry.clientId] ?? 0}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : (
+            <>
+              <div className="relative min-h-0 flex-1">
+                {isPainter ? (
+                  <p className="mb-2 rounded-xl bg-primary/10 px-3 py-2 text-center text-sm font-medium text-ink">
+                    {copy.secretWord.replace("{word}", round.word ?? "")}
+                  </p>
+                ) : (
+                  <p className="mb-2 text-center text-xs font-medium uppercase tracking-[0.14em] text-muted">
+                    {copy.guesser}
+                  </p>
+                )}
+                <div className="relative h-[42vh] min-h-[220px] overflow-hidden rounded-2xl border border-primary/15">
+                  {!isPainter ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setVotePrompt(round.painterId)
+                      }
+                      className="absolute left-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-white/90 text-amber-600 shadow-sm"
+                    >
+                      <AlertTriangle className="size-4" />
+                    </button>
+                  ) : null}
+                  <DrawCanvas
+                    strokes={strokes}
+                    color={color}
+                    width={brushWidth}
+                    interactive={isPainter && round.phase === "draw"}
+                    onStroke={onStroke}
+                  />
+                </div>
+                {isPainter && round.phase === "draw" ? (
+                  <div className="mt-2 flex items-center gap-2">
+                    {drawConfig.colors.map((swatch) => (
+                      <button
+                        key={swatch.id}
+                        type="button"
+                        aria-label={swatch.id}
+                        onClick={() => setColor(swatch.hex)}
+                        className={`size-8 rounded-full border-2 ${
+                          color === swatch.hex ? "border-ink" : "border-transparent"
+                        }`}
+                        style={{ background: swatch.hex }}
+                      />
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setBrush("thin")}
+                      className={`rounded-full px-2 py-1 text-[10px] font-medium ${
+                        brush === "thin" ? "bg-primary text-on-primary" : "bg-surface"
+                      }`}
+                    >
+                      {copy.thinBrush}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBrush("thick")}
+                      className={`rounded-full px-2 py-1 text-[10px] font-medium ${
+                        brush === "thick" ? "bg-primary text-on-primary" : "bg-surface"
+                      }`}
+                    >
+                      {copy.thickBrush}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={undoBoard}
+                      aria-label={copy.undo}
+                      className="ml-auto flex size-9 items-center justify-center rounded-full bg-surface"
+                    >
+                      <Undo2 className="size-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearBoard}
+                      aria-label={copy.clear}
+                      className="flex size-9 items-center justify-center rounded-full bg-surface"
+                    >
+                      <Eraser className="size-4" />
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+
+              <section className="mt-3 flex min-h-0 flex-1 flex-col">
+                <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted">
+                  {copy.chatTitle}
+                </p>
+                <ul
+                  ref={chatListRef}
+                  className="mt-1 max-h-28 space-y-1 overflow-y-auto"
+                >
+                  {chat.map((message) => {
+                    const isMuted = muted.includes(message.clientId);
+                    return (
+                      <li
+                        key={message.id}
+                        className={`flex items-start justify-between gap-2 rounded-xl px-2 py-1.5 text-xs ${
+                          !isMuted && message.kind === "correct"
+                            ? "bg-emerald-500/15 text-emerald-800"
+                            : "bg-surface text-ink"
+                        }`}
+                      >
+                        <span className={isMuted ? "italic text-muted" : undefined}>
+                          {isMuted
+                            ? `${message.nickname}`
+                            : message.kind === "correct"
+                              ? copy.correctBanner.replace("{nickname}", message.nickname)
+                              : `${message.avatar} ${message.nickname}: ${message.text}`}
+                        </span>
+                        {message.clientId !== player.clientId ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleMute(message.clientId)}
+                            aria-label={isMuted ? copy.unmute : copy.mute}
+                            className="shrink-0 text-muted"
+                          >
+                            {isMuted ? (
+                              <VolumeX className="size-3.5" />
+                            ) : (
+                              <Volume2 className="size-3.5" />
+                            )}
+                          </button>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+                {!isPainter && round.phase === "draw" ? (
+                  alreadyCorrect ? (
+                    <p className="mt-2 text-center text-xs font-medium text-muted">
+                      {copy.lockedGuess}
+                    </p>
+                  ) : (
+                    <form
+                      className="mt-2 flex gap-2"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        submitGuess();
+                      }}
+                    >
+                      <input
+                        value={guess}
+                        onChange={(event) => setGuess(event.target.value)}
+                        placeholder={copy.guessPlaceholder}
+                        className="field-input min-h-11 flex-1 text-sm"
+                      />
+                      <button
+                        type="submit"
+                        aria-label={copy.guessSend}
+                        className="btn-primary min-h-11 px-3"
+                      >
+                        <Send className="size-4" />
+                      </button>
+                    </form>
+                  )
+                ) : null}
+              </section>
+            </>
+          )}
+        </main>
+
+        {votePrompt ? (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-ink/50 px-6">
+            <div className="w-full max-w-xs rounded-2xl bg-background p-5 text-center">
+              <p className="text-sm font-medium text-ink">{copy.voteKick}</p>
+              {voteTally && voteTally.targetId === votePrompt ? (
+                <p className="mt-2 text-xs text-muted">
+                  {copy.voteProgress
+                    .replace("{votes}", String(voteTally.votes))
+                    .replace("{need}", String(voteTally.need))}
+                </p>
+              ) : null}
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setVotePrompt(null)}
+                  className="btn-secondary min-h-11 text-sm"
+                >
+                  {copy.voteNo}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => voteKick(votePrompt)}
+                  className="btn-primary min-h-11 text-sm"
+                >
+                  {copy.voteYes}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {notice ? (
+          <p className="pointer-events-none absolute inset-x-6 bottom-8 rounded-2xl bg-ink px-4 py-3 text-center text-sm text-background">
+            {notice}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}

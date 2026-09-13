@@ -34,6 +34,7 @@ export const DUEL_GAME_IDS: DuelGameId[] = [
   "emoji",
   "swipe",
   "number",
+  "quiz",
 ];
 
 export const CHALLENGE_TIMEOUT_MS = 15_000;
@@ -58,7 +59,7 @@ export type ChallengeDeclinePayload = {
 };
 
 export type ChallengeCancelPayload = {
-  matchId: string;
+  challengerId: string;
   targetId: string;
 };
 
@@ -73,12 +74,98 @@ export function makeDuelClientId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+const CLIENT_ID_STORAGE_KEY = "duel_client_id";
+const IDENTITY_STORAGE_KEY = "duel_identity";
+const MATCH_STORAGE_KEY = "duel_active_match";
+
+/**
+ * Reuses the same clientId across a page refresh (sessionStorage is scoped to
+ * the tab and cleared on real tab close), so a reloading player keeps their
+ * identity and can rejoin an in-progress match room.
+ */
+export function readOrCreateClientId(): string {
+  if (typeof window !== "undefined") {
+    try {
+      const existing = window.sessionStorage.getItem(CLIENT_ID_STORAGE_KEY);
+      if (existing) return existing;
+    } catch {
+      // ignore storage errors, fall through to a fresh id
+    }
+  }
+  const created = makeDuelClientId();
+  if (typeof window !== "undefined") {
+    try {
+      window.sessionStorage.setItem(CLIENT_ID_STORAGE_KEY, created);
+    } catch {
+      // ignore storage errors
+    }
+  }
+  return created;
+}
+
+export function persistIdentity(identity: DuelIdentity): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(IDENTITY_STORAGE_KEY, JSON.stringify(identity));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function readOrCreateIdentity(): DuelIdentity {
+  if (typeof window !== "undefined") {
+    try {
+      const raw = window.sessionStorage.getItem(IDENTITY_STORAGE_KEY);
+      if (raw) {
+        const stored = JSON.parse(raw) as DuelIdentity;
+        const allowed = tenantConfig.duel.nicknames.aliases.some(
+          (alias) =>
+            alias.nickname === stored.nickname && alias.avatar === stored.avatar,
+        );
+        if (allowed) return stored;
+      }
+    } catch {
+      // ignore storage errors, fall through to a fresh identity
+    }
+  }
+  const created = generateIdentity();
+  persistIdentity(created);
+  return created;
+}
+
+/** Persists the active match so a page refresh can attempt to rejoin the same room. */
+export function persistActiveMatch(match: DuelMatch): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(MATCH_STORAGE_KEY, JSON.stringify(match));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function readPersistedMatch(): DuelMatch | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(MATCH_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as DuelMatch) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearPersistedMatch(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(MATCH_STORAGE_KEY);
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export function generateIdentity(): DuelIdentity {
-  const { adjectives, nouns, emojis } = tenantConfig.duel.nicknames;
-  const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
-  const noun = nouns[Math.floor(Math.random() * nouns.length)];
-  const avatar = emojis[Math.floor(Math.random() * emojis.length)];
-  return { nickname: `${adjective} ${noun}`, avatar };
+  const { aliases } = tenantConfig.duel.nicknames;
+  const selected = aliases[Math.floor(Math.random() * aliases.length)];
+  return { nickname: selected.nickname, avatar: selected.avatar };
 }
 
 export function commonGames(

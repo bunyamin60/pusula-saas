@@ -13,13 +13,19 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import { Swords } from "lucide-react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import { DrawRoom } from "@/components/DrawRoom";
 import { GameContainer } from "@/components/GameContainer";
 import { tenantConfig, type DuelGameId } from "@/config/tenant.config";
 import {
   CHALLENGE_TIMEOUT_MS,
+  clearPersistedMatch,
   enabledGameIds,
   generateIdentity,
-  makeDuelClientId,
+  persistActiveMatch,
+  persistIdentity,
+  readOrCreateClientId,
+  readOrCreateIdentity,
+  readPersistedMatch,
   makeMatchId,
   resolveGameForMatch,
   type ChallengeAcceptPayload,
@@ -31,7 +37,7 @@ import {
   type DuelPlayer,
   type SelectedGame,
 } from "@/lib/duel";
-import { getSupabase } from "@/lib/supabase";
+import { getSupabase, isRealtimeJoined, wakeRealtime } from "@/lib/supabase";
 import { useCampaign } from "@/lib/useCampaign";
 
 type OutgoingChallenge = {
@@ -49,17 +55,23 @@ type IncomingChallenge = {
 };
 
 type DuelContextValue = {
+  tenantId: string;
   ready: boolean;
   enabledGames: DuelGameId[];
   identity: DuelIdentity;
   rerollIdentity: () => void;
+  chooseIdentity: (identity: DuelIdentity) => void;
   peers: DuelPlayer[];
   connected: boolean;
+  connectionError: boolean;
   player: DuelPlayer;
   selectedGame: SelectedGame;
   setSelectedGame: (game: SelectedGame) => void;
   sendChallenge: (target: DuelPlayer) => void;
   inMatch: boolean;
+  inDrawRoom: boolean;
+  joinDrawRoom: (roomId: string) => void;
+  leaveDrawRoom: () => void;
 };
 
 const DuelContext = createContext<DuelContextValue | null>(null);
@@ -86,15 +98,19 @@ export function DuelProvider({
     [campaign.enabledGames],
   );
   const supabase = useMemo(() => getSupabase(), []);
-  const channelRef = useRef<RealtimeChannel | null>(null);
+  // Named explicitly: this is the single, long-lived lobby presence channel.
+  // It must never be torn down/recreated just because the player's nickname
+  // or avatar changes (see the dedicated dependency array below).
+  const lobbyChannelRef = useRef<RealtimeChannel | null>(null);
   const playerRef = useRef<DuelPlayer | null>(null);
   const outgoingRef = useRef<OutgoingChallenge | null>(null);
   const incomingRef = useRef<IncomingChallenge | null>(null);
 
-  const [clientId] = useState(makeDuelClientId);
-  const [identity, setIdentity] = useState<DuelIdentity>(generateIdentity);
+  const [clientId] = useState(readOrCreateClientId);
+  const [identity, setIdentity] = useState<DuelIdentity>(readOrCreateIdentity);
   const [peers, setPeers] = useState<DuelPlayer[]>([]);
   const [connected, setConnected] = useState(false);
+  const [connectionError, setConnectionError] = useState(() => supabase == null);
   const [selectedGame, setSelectedGame] = useState<SelectedGame>(
     () => enabled[0] ?? "random",
   );
@@ -103,7 +119,19 @@ export function DuelProvider({
   const [incomingChallenge, setIncomingChallenge] =
     useState<IncomingChallenge | null>(null);
   const [outgoingNotice, setOutgoingNotice] = useState<string | null>(null);
-  const [match, setMatch] = useState<DuelMatch | null>(null);
+  // Restored from sessionStorage when present, so a page refresh mid-match can
+  // attempt to rejoin the same match room instead of losing the game.
+  const [match, setMatch] = useState<DuelMatch | null>(readPersistedMatch);
+  const [drawRoomId, setDrawRoomId] = useState<string | null>(null);
+
+  const setActiveMatch = useCallback((next: DuelMatch | null) => {
+    if (next) {
+      persistActiveMatch(next);
+    } else {
+      clearPersistedMatch();
+    }
+    setMatch(next);
+  }, []);
 
   useEffect(() => {
     outgoingRef.current = outgoingChallenge;
@@ -113,7 +141,9 @@ export function DuelProvider({
     incomingRef.current = incomingChallenge;
   }, [incomingChallenge]);
 
-  const busy = match != null || outgoingChallenge != null || incomingChallenge != null;
+  // Pending invitations are still a lobby state. Marking them as in_game made
+  // both players disappear from the idle presence list until the invite ended.
+  const busy = match != null || drawRoomId != null;
 
   const player = useMemo<DuelPlayer>(
     () => ({
@@ -132,91 +162,200 @@ export function DuelProvider({
   }, [player]);
 
   useEffect(() => {
-    if (!supabase || enabled.length === 0) return;
-    const channel = supabase.channel(`tenant_${tenantId}_lobby`, {
-      config: {
-        presence: { key: clientId },
-        broadcast: { self: false },
-      },
-    });
+    if (!supabase) return;
+    const client = supabase;
+    let cancelled = false;
+    let joining = false;
+    let retryTimer: number | null = null;
+    let channel: RealtimeChannel | null = null;
 
-    channel
-      .on("presence", { event: "sync" }, () => {
-        const state = channel.presenceState<DuelPlayer>();
-        const next = Object.values(state)
-          .flat()
-          .map(
-            (entry): DuelPlayer => ({
+    function clearRetry() {
+      if (retryTimer != null) {
+        window.clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+    }
+
+    function bind(next: RealtimeChannel) {
+      next
+        .on("presence", { event: "sync" }, () => {
+          const state = next.presenceState<DuelPlayer>();
+          const syncedPlayers = new Map<string, DuelPlayer>();
+          for (const entry of Object.values(state).flat()) {
+            if (entry.clientId === clientId || entry.status !== "idle") continue;
+            // A reconnect can briefly expose multiple presence metas for the same
+            // key. The sync snapshot remains the only source of truth; deduping it
+            // prevents duplicate/ghost rows without manually removing players.
+            syncedPlayers.set(entry.clientId, {
               clientId: entry.clientId,
               nickname: entry.nickname,
               avatar: entry.avatar,
               games: entry.games,
               status: entry.status,
               onlineAt: entry.onlineAt,
-            }),
-          )
-          .filter(
-            (entry) => entry.clientId !== clientId && entry.status === "idle",
+            });
+          }
+          setPeers(Array.from(syncedPlayers.values()));
+        })
+        .on("broadcast", { event: "challenge_request" }, ({ payload }) => {
+          const request = payload as ChallengeRequestPayload;
+          const current = playerRef.current;
+          if (!current || request.targetId !== current.clientId) return;
+          if (current.status !== "idle") return;
+          if (incomingRef.current || outgoingRef.current) return;
+          const nextChallenge: IncomingChallenge = {
+            matchId: request.matchId,
+            from: request.from,
+            gameId: request.gameId,
+            expiresAt: Date.now() + CHALLENGE_TIMEOUT_MS,
+          };
+          incomingRef.current = nextChallenge;
+          setIncomingChallenge(nextChallenge);
+        })
+        .on("broadcast", { event: "challenge_cancelled" }, ({ payload }) => {
+          const cancel = payload as ChallengeCancelPayload;
+          if (cancel.targetId !== clientId) return;
+          const current = incomingRef.current;
+          if (!current || current.from.clientId !== cancel.challengerId) return;
+          incomingRef.current = null;
+          setIncomingChallenge(null);
+          setOutgoingNotice(
+            copy.challengeCancelledNotice.replace(
+              "{nickname}",
+              current.from.nickname,
+            ),
           );
-        setPeers(next);
-      })
-      .on("broadcast", { event: "challenge_request" }, ({ payload }) => {
-        const request = payload as ChallengeRequestPayload;
-        const current = playerRef.current;
-        if (!current || request.targetId !== current.clientId) return;
-        if (current.status !== "idle") return;
-        setIncomingChallenge({
-          matchId: request.matchId,
-          from: request.from,
-          gameId: request.gameId,
-          expiresAt: Date.now() + CHALLENGE_TIMEOUT_MS,
+        })
+        .on("broadcast", { event: "challenge_accept" }, ({ payload }) => {
+          const accept = payload as ChallengeAcceptPayload;
+          if (accept.targetId !== clientId) return;
+          const current = outgoingRef.current;
+          if (!current || current.matchId !== accept.matchId) return;
+          outgoingRef.current = null;
+          setOutgoingChallenge(null);
+          setActiveMatch({ id: accept.matchId, gameId: current.gameId, opponent: accept.by });
+        })
+        .on("broadcast", { event: "challenge_declined" }, ({ payload }) => {
+          const decline = payload as ChallengeDeclinePayload;
+          if (decline.targetId !== clientId) return;
+          const current = outgoingRef.current;
+          if (!current || current.matchId !== decline.matchId) return;
+          outgoingRef.current = null;
+          setOutgoingChallenge(null);
+          setOutgoingNotice(
+            decline.reason === "declined"
+              ? copy.challengeDeclinedNotice
+              : copy.challengeExpired,
+          );
+        })
+        .subscribe(async (status) => {
+          if (cancelled) return;
+          if (status === "SUBSCRIBED") {
+            clearRetry();
+            setConnected(true);
+            setConnectionError(false);
+            if (playerRef.current) await next.track(playerRef.current);
+            return;
+          }
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            setConnected(false);
+            setConnectionError(true);
+            scheduleRejoin();
+            return;
+          }
+          if (status === "CLOSED") {
+            setConnected(false);
+            scheduleRejoin();
+          }
         });
-      })
-      .on("broadcast", { event: "challenge_cancel" }, ({ payload }) => {
-        const cancel = payload as ChallengeCancelPayload;
-        if (cancel.targetId !== clientId) return;
-        const current = incomingRef.current;
-        if (!current || current.matchId !== cancel.matchId) return;
-        setIncomingChallenge(null);
-      })
-      .on("broadcast", { event: "challenge_accept" }, ({ payload }) => {
-        const accept = payload as ChallengeAcceptPayload;
-        if (accept.targetId !== clientId) return;
-        const current = outgoingRef.current;
-        if (!current || current.matchId !== accept.matchId) return;
-        setOutgoingChallenge(null);
-        setMatch({ id: accept.matchId, gameId: current.gameId, opponent: accept.by });
-      })
-      .on("broadcast", { event: "challenge_decline" }, ({ payload }) => {
-        const decline = payload as ChallengeDeclinePayload;
-        if (decline.targetId !== clientId) return;
-        const current = outgoingRef.current;
-        if (!current || current.matchId !== decline.matchId) return;
-        setOutgoingChallenge(null);
-        setOutgoingNotice(copy.challengeExpired);
-      })
-      .subscribe(async (status) => {
-        if (status === "SUBSCRIBED") {
-          setConnected(true);
-          if (playerRef.current) await channel.track(playerRef.current);
-          return;
-        }
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          setConnected(false);
-        }
-      });
+    }
 
-    channelRef.current = channel;
-    return () => {
-      channelRef.current = null;
+    function scheduleRejoin() {
+      if (cancelled || document.visibilityState === "hidden") return;
+      clearRetry();
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null;
+        void rejoin();
+      }, 500);
+    }
+
+    async function rejoin() {
+      if (cancelled || joining) return;
+      joining = true;
+      wakeRealtime();
+      const previous = channel;
+      channel = null;
+      lobbyChannelRef.current = null;
+      if (previous) await client.removeChannel(previous);
+      if (cancelled) {
+        joining = false;
+        return;
+      }
+      const next = client.channel(`tenant_${tenantId}_lobby`, {
+        config: {
+          presence: { key: clientId },
+          broadcast: { self: false },
+        },
+      });
+      channel = next;
+      lobbyChannelRef.current = next;
+      bind(next);
+      joining = false;
+    }
+
+    function resume() {
+      if (cancelled) return;
+      if (document.visibilityState === "hidden") return;
+      wakeRealtime();
+      if (isRealtimeJoined(channel)) {
+        if (playerRef.current) void channel?.track(playerRef.current);
+        return;
+      }
       setConnected(false);
-      void supabase.removeChannel(channel);
+      void rejoin();
+    }
+
+    function onPageShow(event: PageTransitionEvent) {
+      if (event.persisted) {
+        setConnected(false);
+        void rejoin();
+        return;
+      }
+      resume();
+    }
+
+    void rejoin();
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("focus", resume);
+    window.addEventListener("online", resume);
+    window.addEventListener("pageshow", onPageShow);
+
+    return () => {
+      cancelled = true;
+      clearRetry();
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("focus", resume);
+      window.removeEventListener("online", resume);
+      window.removeEventListener("pageshow", onPageShow);
+      const current = channel;
+      channel = null;
+      lobbyChannelRef.current = null;
+      setConnected(false);
+      if (current) void client.removeChannel(current);
     };
-  }, [clientId, copy.challengeExpired, enabled.length, supabase, tenantId]);
+  }, [
+    clientId,
+    copy.challengeDeclinedNotice,
+    copy.challengeCancelledNotice,
+    copy.challengeExpired,
+    setActiveMatch,
+    supabase,
+    tenantId,
+  ]);
 
   useEffect(() => {
     if (!connected) return;
-    void channelRef.current?.track(player);
+    void lobbyChannelRef.current?.track(player);
   }, [connected, player]);
 
   useEffect(() => {
@@ -225,6 +364,7 @@ export function DuelProvider({
     const timer = window.setTimeout(() => {
       setOutgoingChallenge((current) => {
         if (!current || current.matchId !== outgoingChallenge.matchId) return current;
+        outgoingRef.current = null;
         setOutgoingNotice(copy.challengeExpired);
         return null;
       });
@@ -238,9 +378,10 @@ export function DuelProvider({
     const timer = window.setTimeout(() => {
       setIncomingChallenge((current) => {
         if (!current || current.matchId !== incomingChallenge.matchId) return current;
-        void channelRef.current?.send({
+        incomingRef.current = null;
+        void lobbyChannelRef.current?.send({
           type: "broadcast",
-          event: "challenge_decline",
+          event: "challenge_declined",
           payload: {
             matchId: current.matchId,
             targetId: current.from.clientId,
@@ -259,11 +400,35 @@ export function DuelProvider({
     return () => window.clearTimeout(timer);
   }, [outgoingNotice]);
 
-  const rerollIdentity = useCallback(() => setIdentity(generateIdentity()), []);
+  const applyIdentity = useCallback((next: DuelIdentity) => {
+    persistIdentity(next);
+    setIdentity(next);
+
+    const nextPlayer: DuelPlayer = {
+      clientId,
+      nickname: next.nickname,
+      avatar: next.avatar,
+      games: enabled,
+      status: playerRef.current?.status ?? "idle",
+      onlineAt: new Date().toISOString(),
+    };
+    void lobbyChannelRef.current?.track(nextPlayer);
+  }, [clientId, enabled]);
+
+  const rerollIdentity = useCallback(
+    () => applyIdentity(generateIdentity()),
+    [applyIdentity],
+  );
+
+  const chooseIdentity = useCallback(
+    (next: DuelIdentity) => applyIdentity(next),
+    [applyIdentity],
+  );
 
   const sendChallenge = useCallback(
     (target: DuelPlayer) => {
       if (outgoingRef.current || incomingRef.current) return;
+      if (match != null || drawRoomId != null) return;
       const gameId = resolveGameForMatch(selectedGame, enabled, target.games);
       if (!gameId) return;
       const matchId = makeMatchId(tenantId);
@@ -273,61 +438,66 @@ export function DuelProvider({
         targetId: target.clientId,
         from: playerRef.current ?? player,
       };
-      void channelRef.current?.send({
-        type: "broadcast",
-        event: "challenge_request",
-        payload: request,
-      });
-      setOutgoingChallenge({
+      const nextChallenge: OutgoingChallenge = {
         matchId,
         target,
         gameId,
         expiresAt: Date.now() + CHALLENGE_TIMEOUT_MS,
+      };
+      outgoingRef.current = nextChallenge;
+      void lobbyChannelRef.current?.send({
+        type: "broadcast",
+        event: "challenge_request",
+        payload: request,
       });
+      setOutgoingChallenge(nextChallenge);
     },
-    [enabled, player, selectedGame, tenantId],
+    [drawRoomId, enabled, match, player, selectedGame, tenantId],
   );
 
   const cancelOutgoingChallenge = useCallback(() => {
     setOutgoingChallenge((current) => {
       if (current) {
-        void channelRef.current?.send({
+        outgoingRef.current = null;
+        void lobbyChannelRef.current?.send({
           type: "broadcast",
-          event: "challenge_cancel",
+          event: "challenge_cancelled",
           payload: {
-            matchId: current.matchId,
+            challengerId: clientId,
             targetId: current.target.clientId,
           } satisfies ChallengeCancelPayload,
         });
       }
       return null;
     });
-  }, []);
+  }, [clientId]);
 
   const acceptIncomingChallenge = useCallback(() => {
     setIncomingChallenge((current) => {
       if (!current) return current;
+      incomingRef.current = null;
       const accept: ChallengeAcceptPayload = {
         matchId: current.matchId,
         targetId: current.from.clientId,
         by: playerRef.current ?? player,
       };
-      void channelRef.current?.send({
+      void lobbyChannelRef.current?.send({
         type: "broadcast",
         event: "challenge_accept",
         payload: accept,
       });
-      setMatch({ id: current.matchId, gameId: current.gameId, opponent: current.from });
+      setActiveMatch({ id: current.matchId, gameId: current.gameId, opponent: current.from });
       return null;
     });
-  }, [player]);
+  }, [player, setActiveMatch]);
 
   const declineIncomingChallenge = useCallback(() => {
     setIncomingChallenge((current) => {
       if (current) {
-        void channelRef.current?.send({
+        incomingRef.current = null;
+        void lobbyChannelRef.current?.send({
           type: "broadcast",
-          event: "challenge_decline",
+          event: "challenge_declined",
           payload: {
             matchId: current.matchId,
             targetId: current.from.clientId,
@@ -339,23 +509,56 @@ export function DuelProvider({
     });
   }, []);
 
-  const exitMatch = useCallback(() => setMatch(null), []);
+  const exitMatch = useCallback(() => setActiveMatch(null), [setActiveMatch]);
+
+  const joinDrawRoom = useCallback((roomId: string) => {
+    if (match != null) return;
+    incomingRef.current = null;
+    outgoingRef.current = null;
+    setIncomingChallenge(null);
+    setOutgoingChallenge(null);
+    setDrawRoomId(roomId);
+  }, [match]);
+
+  const leaveDrawRoom = useCallback(() => setDrawRoomId(null), []);
 
   const value = useMemo<DuelContextValue>(
     () => ({
+      tenantId,
       ready: enabled.length > 0,
       enabledGames: enabled,
       identity,
       rerollIdentity,
+      chooseIdentity,
       peers,
       connected,
+      connectionError,
       player,
       selectedGame,
       setSelectedGame,
       sendChallenge,
       inMatch: match != null,
+      inDrawRoom: drawRoomId != null,
+      joinDrawRoom,
+      leaveDrawRoom,
     }),
-    [connected, enabled, identity, match, peers, player, rerollIdentity, selectedGame, sendChallenge],
+    [
+      connected,
+      connectionError,
+      chooseIdentity,
+      drawRoomId,
+      enabled,
+      identity,
+      joinDrawRoom,
+      leaveDrawRoom,
+      match,
+      peers,
+      player,
+      rerollIdentity,
+      selectedGame,
+      sendChallenge,
+      tenantId,
+    ],
   );
 
   return (
@@ -382,7 +585,20 @@ export function DuelProvider({
         {outgoingNotice ? <NoticeToast message={outgoingNotice} /> : null}
       </AnimatePresence>
       {match ? (
-        <GameContainer match={match} player={player} onExit={exitMatch} />
+        <GameContainer
+          tenantId={tenantId}
+          match={match}
+          player={player}
+          onExit={exitMatch}
+        />
+      ) : null}
+      {drawRoomId ? (
+        <DrawRoom
+          roomId={drawRoomId}
+          tenantId={tenantId}
+          player={player}
+          onExit={leaveDrawRoom}
+        />
       ) : null}
     </DuelContext.Provider>
   );

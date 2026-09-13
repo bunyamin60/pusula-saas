@@ -1275,7 +1275,7 @@ export function CampaignForm({
               </p>
             </div>
             <div className="space-y-3">
-              {(["trivia", "emoji", "swipe", "number"] as DuelGameId[]).map(
+              {(["trivia", "emoji", "swipe", "number", "quiz"] as DuelGameId[]).map(
                 (id) => {
                   const enabled = form.enabledGames[id];
                   return (

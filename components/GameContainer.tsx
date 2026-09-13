@@ -9,6 +9,7 @@ import {
 } from "react";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import { Hourglass, WifiOff, X } from "lucide-react";
+import { QuizResultRank } from "@/components/DuelLeaderboard";
 import { tenantConfig, type DuelGameId } from "@/config/tenant.config";
 import {
   deterministicNumber,
@@ -16,13 +17,16 @@ import {
   type DuelMatch,
   type DuelPlayer,
 } from "@/lib/duel";
-import { getSupabase } from "@/lib/supabase";
+import { getSupabase, isRealtimeJoined, wakeRealtime } from "@/lib/supabase";
 
 const COUNTDOWN_MS = 3000;
 const READY_RESEND_MS = 500;
-const CONNECT_TIMEOUT_MS = 8000;
+const CONNECT_TIMEOUT_MS = 6000;
+const DISCONNECT_GRACE_MS = 4000;
+const REMATCH_RESPONSE_TIMEOUT_MS = 4000;
 
 type GameContainerProps = {
+  tenantId: string;
   match: DuelMatch;
   player: DuelPlayer;
   onExit: () => void;
@@ -33,6 +37,7 @@ type StartPayload = { startAt: number };
 type PlayerPayload = { playerId: string };
 
 export function GameContainer({
+  tenantId,
   match,
   player,
   onExit,
@@ -52,6 +57,12 @@ export function GameContainer({
   const readyResendTimerRef = useRef<number | null>(null);
   const connectTimeoutRef = useRef<number | null>(null);
   const restartHandshakeRef = useRef<() => void>(() => {});
+  const startAtRef = useRef<number | null>(null);
+  const disconnectGraceTimerRef = useRef<number | null>(null);
+  const rematchResponseTimerRef = useRef<number | null>(null);
+  const autoExitTimerRef = useRef<number | null>(null);
+  const opponentLeftRef = useRef(false);
+  const leavingRef = useRef(false);
   const [startAt, setStartAt] = useState<number | null>(null);
   const [localScore, setLocalScore] = useState(0);
   const [opponentScore, setOpponentScore] = useState(0);
@@ -59,6 +70,11 @@ export function GameContainer({
   const [opponentFinal, setOpponentFinal] = useState<number | null>(null);
   const [rematchIncoming, setRematchIncoming] = useState(false);
   const [connectFailed, setConnectFailed] = useState(false);
+  const [opponentDisconnected, setOpponentDisconnected] = useState(false);
+  const [forfeitWin, setForfeitWin] = useState(false);
+  const [opponentLeft, setOpponentLeft] = useState(false);
+  const [awaitingRematch, setAwaitingRematch] = useState(false);
+  const [matchNotice, setMatchNotice] = useState<string | null>(null);
 
   const send = useCallback(
     (event: string, payload: Record<string, unknown>) => {
@@ -76,29 +92,59 @@ export function GameContainer({
     localFinalRef.current = null;
     localRematchRef.current = false;
     startSentRef.current = false;
+    startAtRef.current = null;
     setStartAt(null);
     setLocalScore(0);
     setOpponentScore(0);
     setLocalFinal(null);
     setOpponentFinal(null);
     setRematchIncoming(false);
+    setOpponentDisconnected(false);
+    setForfeitWin(false);
+    setOpponentLeft(false);
+    setAwaitingRematch(false);
+    setMatchNotice(null);
+    opponentLeftRef.current = false;
   }, []);
 
   const launchIfHost = useCallback(() => {
     if (!host || startSentRef.current) return;
     startSentRef.current = true;
     const nextStart = Date.now() + COUNTDOWN_MS;
+    startAtRef.current = nextStart;
     setStartAt(nextStart);
     send("game_start", { startAt: nextStart });
   }, [host, send]);
 
+  const claimForfeitWin = useCallback(() => {
+    setForfeitWin(true);
+  }, []);
+
+  const leaveToLobby = useCallback(async () => {
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+    const channel = channelRef.current;
+    if (channel) {
+      await channel.send({
+        type: "broadcast",
+        event: "opponent_left_to_lobby",
+        payload: { playerId: player.clientId },
+      });
+    }
+    onExit();
+  }, [onExit, player.clientId]);
+
   useEffect(() => {
     if (!supabase) return;
+    leavingRef.current = false;
     localReadyRef.current = false;
     remoteReadyRef.current = false;
 
     const channel = supabase.channel(`match_${match.id}`, {
-      config: { broadcast: { self: false } },
+      config: {
+        broadcast: { self: false },
+        presence: { key: player.clientId },
+      },
     });
 
     function clearReadyResend() {
@@ -112,6 +158,27 @@ export function GameContainer({
       if (connectTimeoutRef.current != null) {
         window.clearTimeout(connectTimeoutRef.current);
         connectTimeoutRef.current = null;
+      }
+    }
+
+    function clearDisconnectGrace() {
+      if (disconnectGraceTimerRef.current != null) {
+        window.clearTimeout(disconnectGraceTimerRef.current);
+        disconnectGraceTimerRef.current = null;
+      }
+    }
+
+    function clearRematchResponseTimeout() {
+      if (rematchResponseTimerRef.current != null) {
+        window.clearTimeout(rematchResponseTimerRef.current);
+        rematchResponseTimerRef.current = null;
+      }
+    }
+
+    function clearAutoExitTimeout() {
+      if (autoExitTimerRef.current != null) {
+        window.clearTimeout(autoExitTimerRef.current);
+        autoExitTimerRef.current = null;
       }
     }
 
@@ -138,6 +205,11 @@ export function GameContainer({
       connectTimeoutRef.current = window.setTimeout(() => {
         if (!(localReadyRef.current && remoteReadyRef.current)) {
           clearReadyResend();
+          void channel.send({
+            type: "broadcast",
+            event: "handshake_timeout",
+            payload: { playerId: player.clientId },
+          });
           setConnectFailed(true);
         }
       }, CONNECT_TIMEOUT_MS);
@@ -152,6 +224,14 @@ export function GameContainer({
       }
     }
 
+    function startRematchRound() {
+      clearRematchResponseTimeout();
+      localRematchRef.current = false;
+      resetGame();
+      remoteReadyRef.current = false;
+      beginReadyHandshake();
+    }
+
     restartHandshakeRef.current = beginReadyHandshake;
 
     channel
@@ -164,6 +244,7 @@ export function GameContainer({
       .on("broadcast", { event: "game_start" }, ({ payload }) => {
         const start = payload as StartPayload;
         startSentRef.current = true;
+        startAtRef.current = start.startAt;
         setStartAt(start.startAt);
       })
       .on("broadcast", { event: "score" }, ({ payload }) => {
@@ -185,20 +266,73 @@ export function GameContainer({
           });
         }
       })
-      .on("broadcast", { event: "rematch" }, ({ payload }) => {
+      .on("broadcast", { event: "rematch_request" }, ({ payload }) => {
         const request = payload as PlayerPayload;
         if (request.playerId === player.clientId) return;
+        if (opponentLeftRef.current) return;
         if (localRematchRef.current) {
-          resetGame();
-          remoteReadyRef.current = false;
-          beginReadyHandshake();
+          void channel.send({
+            type: "broadcast",
+            event: "rematch_accepted",
+            payload: { playerId: player.clientId },
+          });
+          startRematchRound();
         } else {
           setRematchIncoming(true);
+        }
+      })
+      .on("broadcast", { event: "rematch_accepted" }, ({ payload }) => {
+        const response = payload as PlayerPayload;
+        if (response.playerId === player.clientId) return;
+        if (!localRematchRef.current || opponentLeftRef.current) return;
+        startRematchRound();
+      })
+      .on("broadcast", { event: "opponent_left_to_lobby" }, ({ payload }) => {
+        const departure = payload as PlayerPayload;
+        if (departure.playerId === player.clientId) return;
+        opponentLeftRef.current = true;
+        localRematchRef.current = false;
+        clearRematchResponseTimeout();
+        setAwaitingRematch(false);
+        setRematchIncoming(false);
+        setOpponentLeft(true);
+      })
+      .on("broadcast", { event: "handshake_timeout" }, ({ payload }) => {
+        const timeout = payload as PlayerPayload;
+        if (timeout.playerId === player.clientId) return;
+        clearReadyResend();
+        clearConnectTimeout();
+        setConnectFailed(true);
+      })
+      .on("presence", { event: "leave" }, ({ key }) => {
+        if (key !== match.opponent.clientId) return;
+        if (opponentLeftRef.current) return;
+        if (disconnectGraceTimerRef.current != null) return;
+        // Grace window absorbs brief drops/refreshes before declaring a forfeit.
+        disconnectGraceTimerRef.current = window.setTimeout(() => {
+          disconnectGraceTimerRef.current = null;
+          setOpponentDisconnected(true);
+        }, DISCONNECT_GRACE_MS);
+      })
+      .on("presence", { event: "join" }, ({ key }) => {
+        if (key !== match.opponent.clientId) return;
+        if (opponentLeftRef.current) return;
+        clearDisconnectGrace();
+        setOpponentDisconnected(false);
+        // Help a rejoining opponent (e.g. after a page refresh) catch back up.
+        if (localReadyRef.current) sendPlayerReady();
+        if (host && startSentRef.current && startAtRef.current != null) {
+          void channel.send({
+            type: "broadcast",
+            event: "game_start",
+            payload: { startAt: startAtRef.current },
+          });
         }
       })
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
           beginReadyHandshake();
+          void channel.track({ clientId: player.clientId });
           return;
         }
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
@@ -212,17 +346,49 @@ export function GameContainer({
     return () => {
       clearReadyResend();
       clearConnectTimeout();
+      clearDisconnectGrace();
+      clearRematchResponseTimeout();
+      clearAutoExitTimeout();
       channelRef.current = null;
       void supabase.removeChannel(channel);
     };
   }, [
+    host,
     launchIfHost,
     match.gameId,
     match.id,
+    match.opponent.clientId,
     player.clientId,
     resetGame,
     supabase,
   ]);
+
+  useEffect(() => {
+    function resume() {
+      if (document.visibilityState === "hidden") return;
+      wakeRealtime();
+      if (isRealtimeJoined(channelRef.current)) {
+        void channelRef.current?.track({ clientId: player.clientId });
+      }
+    }
+    function onPageShow(event: PageTransitionEvent) {
+      if (event.persisted) {
+        wakeRealtime();
+        return;
+      }
+      resume();
+    }
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("focus", resume);
+    window.addEventListener("online", resume);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("focus", resume);
+      window.removeEventListener("online", resume);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [player.clientId]);
 
   const awardPoints = useCallback(
     (points: number) => {
@@ -254,14 +420,31 @@ export function GameContainer({
   );
 
   function requestRematch() {
-    send("rematch", { playerId: player.clientId });
+    if (opponentLeftRef.current || awaitingRematch) return;
     if (rematchIncoming) {
+      send("rematch_accepted", { playerId: player.clientId });
       resetGame();
       remoteReadyRef.current = false;
       restartHandshakeRef.current();
       return;
     }
+
     localRematchRef.current = true;
+    setAwaitingRematch(true);
+    send("rematch_request", { playerId: player.clientId });
+    if (rematchResponseTimerRef.current != null) {
+      window.clearTimeout(rematchResponseTimerRef.current);
+    }
+    rematchResponseTimerRef.current = window.setTimeout(() => {
+      rematchResponseTimerRef.current = null;
+      if (!localRematchRef.current || opponentLeftRef.current) return;
+      localRematchRef.current = false;
+      setAwaitingRematch(false);
+      setMatchNotice(copy.rematchOpponentLeft);
+      autoExitTimerRef.current = window.setTimeout(() => {
+        void leaveToLobby();
+      }, 1600);
+    }, REMATCH_RESPONSE_TIMEOUT_MS);
   }
 
   const finished = localFinal != null && opponentFinal != null;
@@ -271,7 +454,7 @@ export function GameContainer({
   return (
     <div className="fixed inset-0 z-[70] flex justify-center bg-background">
       <div className="flex h-dvh w-full max-w-md flex-col overflow-hidden px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]">
-        {!finished ? (
+        {!finished && !forfeitWin ? (
           <header className="flex items-center justify-between gap-3">
             <ScorePill
               label={copy.you}
@@ -282,7 +465,7 @@ export function GameContainer({
             />
             <button
               type="button"
-              onClick={onExit}
+              onClick={() => void leaveToLobby()}
               aria-label={copy.returnToTable}
               className="flex size-10 shrink-0 items-center justify-center rounded-full bg-surface text-ink"
             >
@@ -299,18 +482,32 @@ export function GameContainer({
         ) : null}
 
         <main className="flex min-h-0 flex-1 flex-col pt-5">
-          {finished ? (
+          {forfeitWin ? (
+            <ForfeitResult onExit={() => void leaveToLobby()} />
+          ) : connectFailed ? (
+            <ConnectionFailed onExit={onExit} />
+          ) : finished ? (
             <ResultScreen
+              tenantId={tenantId}
+              gameId={match.gameId}
+              player={player}
               localScore={localFinal}
               opponentScore={opponentFinal}
               rematchIncoming={rematchIncoming}
+              rematchUnavailable={opponentLeft}
+              awaitingRematch={awaitingRematch}
               onRematch={requestRematch}
-              onExit={onExit}
+              onExit={() => void leaveToLobby()}
+            />
+          ) : opponentLeft ? (
+            <OpponentReturnedToLobby onExit={() => void leaveToLobby()} />
+          ) : opponentDisconnected ? (
+            <OpponentDisconnected
+              onClaimForfeit={claimForfeitWin}
+              onExit={() => void leaveToLobby()}
             />
           ) : localFinal != null ? (
             <FinishedWaiting score={localFinal} />
-          ) : connectFailed ? (
-            <ConnectionFailed onExit={onExit} />
           ) : startAt == null ? (
             <div className="flex flex-1 items-center justify-center text-center text-sm font-medium tracking-wide text-muted">
               <span className="animate-pulse">{copy.waitingOpponent}</span>
@@ -329,6 +526,9 @@ export function GameContainer({
             />
           )}
         </main>
+        <AnimatePresence>
+          {matchNotice ? <MatchToast message={matchNotice} /> : null}
+        </AnimatePresence>
       </div>
     </div>
   );
@@ -351,6 +551,96 @@ function ConnectionFailed({ onExit }: { onExit: () => void }) {
         {copy.connectionFailed}
       </p>
     </motion.div>
+  );
+}
+
+function MatchToast({ message }: { message: string }) {
+  return (
+    <motion.div
+      initial={{ y: 20, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      exit={{ y: 20, opacity: 0 }}
+      className="absolute inset-x-5 bottom-6 z-20 rounded-2xl bg-ink px-4 py-3 text-center text-sm font-medium tracking-wide text-background shadow-lift"
+    >
+      {message}
+    </motion.div>
+  );
+}
+
+function OpponentReturnedToLobby({ onExit }: { onExit: () => void }) {
+  const copy = tenantConfig.copy.duel;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex flex-1 flex-col items-center justify-center text-center"
+    >
+      <p className="font-display text-3xl text-ink">
+        {copy.opponentReturnedToLobby}
+      </p>
+      <button type="button" onClick={onExit} className="btn-primary mt-8 w-full">
+        {copy.returnToTable}
+      </button>
+    </motion.div>
+  );
+}
+
+function OpponentDisconnected({
+  onClaimForfeit,
+  onExit,
+}: {
+  onClaimForfeit: () => void;
+  onExit: () => void;
+}) {
+  const copy = tenantConfig.copy.duel;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex flex-1 flex-col items-center justify-center text-center"
+    >
+      <WifiOff className="size-8 text-red-500" />
+      <p className="mt-4 text-sm font-medium leading-relaxed tracking-wide text-ink">
+        {copy.opponentDisconnected}
+      </p>
+      <div className="mt-8 w-full space-y-3">
+        <button type="button" onClick={onClaimForfeit} className="btn-primary w-full">
+          {copy.claimForfeitWin}
+        </button>
+        <button type="button" onClick={onExit} className="btn-secondary w-full">
+          {copy.returnToTable}
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+function ForfeitResult({ onExit }: { onExit: () => void }) {
+  const copy = tenantConfig.copy.duel;
+  return (
+    <section className="relative flex flex-1 flex-col items-center justify-center overflow-hidden text-center">
+      <Confetti />
+      <motion.div
+        initial={{ scale: 0.75, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className="relative z-10 w-full"
+      >
+        <p className="text-6xl" aria-hidden>
+          🏆
+        </p>
+        <h2 className="mt-5 font-display text-4xl leading-tight text-ink">
+          {copy.winner}
+        </h2>
+        <p className="mt-4 text-sm font-medium tracking-wide text-muted">
+          {copy.forfeitWinNote}
+        </p>
+        <div className="mt-10">
+          <button type="button" onClick={onExit} className="btn-primary w-full">
+            {copy.returnToTable}
+          </button>
+        </div>
+      </motion.div>
+    </section>
   );
 }
 
@@ -433,6 +723,7 @@ function ScorePill({
 function scoreCeiling(gameId: DuelGameId): number {
   if (gameId === "trivia") return 1000;
   if (gameId === "emoji") return 800;
+  if (gameId === "quiz") return tenantConfig.duel.quiz.length * 200;
   if (gameId === "swipe") return tenantConfig.duel.swipe.length;
   return 1;
 }
@@ -452,7 +743,7 @@ function GameEngine({
   onSetScore: (score: number) => void;
   onFinish: (score?: number) => void;
 }) {
-  if (gameId === "trivia" || gameId === "emoji") {
+  if (gameId === "trivia" || gameId === "emoji" || gameId === "quiz") {
     return (
       <ChoiceRounds gameId={gameId} onPoints={onPoints} onFinish={onFinish} />
     );
@@ -476,19 +767,26 @@ function GameEngine({
   );
 }
 
-type ChoiceItem = (typeof tenantConfig.duel.trivia)[number] | (typeof tenantConfig.duel.emoji)[number];
+type ChoiceItem =
+  | (typeof tenantConfig.duel.trivia)[number]
+  | (typeof tenantConfig.duel.emoji)[number]
+  | (typeof tenantConfig.duel.quiz)[number];
 
 function ChoiceRounds({
   gameId,
   onPoints,
   onFinish,
 }: {
-  gameId: "trivia" | "emoji";
+  gameId: "trivia" | "emoji" | "quiz";
   onPoints: (points: number) => void;
   onFinish: (score?: number) => void;
 }) {
   const items =
-    gameId === "trivia" ? tenantConfig.duel.trivia : tenantConfig.duel.emoji;
+    gameId === "trivia"
+      ? tenantConfig.duel.trivia
+      : gameId === "emoji"
+        ? tenantConfig.duel.emoji
+        : tenantConfig.duel.quiz;
   const [round, setRound] = useState(0);
 
   useEffect(() => {
@@ -768,15 +1066,25 @@ function NumberRush({
 }
 
 function ResultScreen({
+  tenantId,
+  gameId,
+  player,
   localScore,
   opponentScore,
   rematchIncoming,
+  rematchUnavailable,
+  awaitingRematch,
   onRematch,
   onExit,
 }: {
+  tenantId: string;
+  gameId: DuelGameId;
+  player: DuelPlayer;
   localScore: number;
   opponentScore: number;
   rematchIncoming: boolean;
+  rematchUnavailable: boolean;
+  awaitingRematch: boolean;
   onRematch: () => void;
   onExit: () => void;
 }) {
@@ -793,19 +1101,35 @@ function ResultScreen({
       >
         <p className="text-6xl" aria-hidden>{won ? "🏆" : draw ? "🤝" : "✨"}</p>
         <h2 className="mt-5 font-display text-4xl leading-tight text-ink">
-          {draw ? copy.draw : won ? copy.winner : copy.loser}
+          {draw ? copy.tie : won ? copy.winner : copy.loser}
         </h2>
         <p className="mt-4 font-display text-2xl text-primary">
           {localScore} — {opponentScore}
         </p>
+        {gameId === "quiz" ? (
+          <QuizResultRank
+            tenantId={tenantId}
+            player={player}
+            score={localScore}
+          />
+        ) : null}
         {rematchIncoming ? (
           <p className="mt-3 animate-pulse text-sm font-medium tracking-wide text-muted">
             {copy.rematchIncoming}
           </p>
         ) : null}
         <div className="mt-10 space-y-3">
-          <button type="button" onClick={onRematch} className="btn-primary w-full">
-            {copy.rematch}
+          <button
+            type="button"
+            onClick={onRematch}
+            disabled={rematchUnavailable || awaitingRematch}
+            className="btn-primary w-full disabled:cursor-not-allowed disabled:opacity-55"
+          >
+            {rematchUnavailable
+              ? copy.opponentReturnedToLobby
+              : awaitingRematch
+                ? copy.rematchWaiting
+                : copy.rematch}
           </button>
           <button type="button" onClick={onExit} className="btn-secondary w-full">
             {copy.returnToTable}

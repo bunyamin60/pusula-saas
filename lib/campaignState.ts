@@ -184,7 +184,13 @@ export function defaultTalkCategories(): TalkCategory[] {
   }));
 }
 
-const DUEL_GAME_IDS: DuelGameId[] = ["trivia", "emoji", "swipe", "number"];
+const DUEL_GAME_IDS: DuelGameId[] = [
+  "trivia",
+  "emoji",
+  "swipe",
+  "number",
+  "quiz",
+];
 
 export function defaultEnabledGames(): EnabledGames {
   return { ...tenantConfig.duel.enabledGames };

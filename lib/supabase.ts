@@ -22,3 +22,12 @@ export function getSupabase(): SupabaseClient | null {
 
   return client;
 }
+
+/** Mobile/Safari freeze the realtime socket when the tab is hidden. */
+export function wakeRealtime(): void {
+  getSupabase()?.realtime.connect();
+}
+
+export function isRealtimeJoined(channel: { state?: string } | null | undefined): boolean {
+  return channel?.state === "joined";
+}

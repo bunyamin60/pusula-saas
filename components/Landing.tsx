@@ -28,13 +28,14 @@ export function Landing({ onStartCompass, onStartTalk, onOpenReward }: LandingPr
   const lounge = isLoungeVenue({ category: campaign.category });
   const compassTitle = compassTitleOf(campaign.category);
   const { kicker, greeting, accent, subhead } = resolveLandingCopy(campaign);
-  const { ready: duelReady, inMatch } = useDuel();
+  const { ready: duelReady, inMatch, inDrawRoom } = useDuel();
   const [isDuelOpen, setIsDuelOpen] = useState(false);
-  const [wasInMatch, setWasInMatch] = useState(inMatch);
+  const [wasBusy, setWasBusy] = useState(inMatch || inDrawRoom);
+  const busy = inMatch || inDrawRoom;
 
-  if (inMatch !== wasInMatch) {
-    setWasInMatch(inMatch);
-    if (inMatch) setIsDuelOpen(false);
+  if (busy !== wasBusy) {
+    setWasBusy(busy);
+    if (busy) setIsDuelOpen(false);
   }
 
   return (
@@ -150,6 +151,9 @@ export function Landing({ onStartCompass, onStartTalk, onOpenReward }: LandingPr
                 </span>
                 <span className="font-display text-base leading-tight text-ink">
                   {defaults.duelTitle}
+                </span>
+                <span className="line-clamp-2 text-[11px] leading-snug text-muted">
+                  {defaults.duelCaption}
                 </span>
               </button>
             ) : null}
