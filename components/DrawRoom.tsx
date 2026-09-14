@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { motion } from "framer-motion";
-import { AlertTriangle, Eraser, Send, Undo2, Volume2, VolumeX, X } from "lucide-react";
+import { AlertTriangle, Send, Trash2, Undo2, Volume2, VolumeX, X } from "lucide-react";
 import { DrawCanvas } from "@/components/DrawCanvas";
 import { tenantConfig } from "@/config/tenant.config";
 import {
@@ -91,7 +91,9 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
   const hostApiRef = useRef<HostApi | null>(null);
   const onExitRef = useRef(onExit);
   const playerRef = useRef(player);
+  const shellRef = useRef<HTMLDivElement | null>(null);
   const chatListRef = useRef<HTMLUListElement | null>(null);
+  const chatEndRef = useRef<HTMLLIElement | null>(null);
 
   useEffect(() => {
     onExitRef.current = onExit;
@@ -102,6 +104,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
   }, [player]);
 
   const send = useCallback((event: string, payload: Record<string, unknown>) => {
+    wakeRealtime();
     void channelRef.current?.send({ type: "broadcast", event, payload });
   }, []);
 
@@ -123,13 +126,50 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
   }, [strokes]);
 
   useEffect(() => {
-    const list = chatListRef.current;
-    if (!list) return;
     const frame = window.requestAnimationFrame(() => {
-      list.scrollTop = list.scrollHeight;
+      const list = chatListRef.current;
+      if (list) {
+        list.scrollTop = list.scrollHeight;
+        return;
+      }
+      chatEndRef.current?.scrollIntoView({ block: "end", inline: "nearest" });
     });
     return () => window.cancelAnimationFrame(frame);
   }, [chat]);
+
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const previousHtml = html.style.overflow;
+    const previousBody = body.style.overflow;
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    return () => {
+      html.style.overflow = previousHtml;
+      body.style.overflow = previousBody;
+    };
+  }, []);
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    const viewport = window.visualViewport;
+    if (!shell || !viewport) return;
+
+    function syncViewport() {
+      if (!shell || !viewport) return;
+      shell.style.top = `${viewport.offsetTop}px`;
+      shell.style.height = `${viewport.height}px`;
+      shell.style.maxHeight = `${viewport.height}px`;
+    }
+
+    syncViewport();
+    viewport.addEventListener("resize", syncViewport);
+    viewport.addEventListener("scroll", syncViewport);
+    return () => {
+      viewport.removeEventListener("resize", syncViewport);
+      viewport.removeEventListener("scroll", syncViewport);
+    };
+  }, []);
 
   useEffect(() => {
     if (!supabase) return;
@@ -158,12 +198,50 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
       });
     }
 
+    function ingestChat(message: DrawChatMessage) {
+      if (!message?.id || !message.clientId) return;
+      setChat((current) => {
+        const duplicate = current.some(
+          (entry) =>
+            entry.id === message.id ||
+            (entry.clientId === message.clientId &&
+              entry.kind === message.kind &&
+              (entry.text ?? "") === (message.text ?? "")),
+        );
+        if (duplicate) return current;
+        return [...current.slice(-40), message];
+      });
+    }
+
     function publishChat(message: DrawChatMessage) {
-      setChat((current) => [...current.slice(-40), message]);
+      ingestChat(message);
       void channel.send({
         type: "broadcast",
         event: "chat",
         payload: message,
+      });
+      void channel.send({
+        type: "broadcast",
+        event: "new_guess",
+        payload: message,
+      });
+    }
+
+    function showGuessToPainter(payload: GuessPayload) {
+      if (roundRef.current.painterId !== player.clientId) return;
+      if (payload.clientId === player.clientId) return;
+      const current = roundRef.current;
+      if (current.phase !== "draw") return;
+      if (current.correctIds.includes(payload.clientId)) return;
+      const correct =
+        Boolean(current.word) && isFuzzyMatch(payload.text, current.word ?? "");
+      ingestChat({
+        id: `guess-${payload.clientId}-${payload.text}`,
+        kind: correct ? "correct" : "wrong",
+        clientId: payload.clientId,
+        nickname: payload.nickname,
+        avatar: payload.avatar,
+        text: correct ? undefined : payload.text,
       });
     }
 
@@ -478,11 +556,15 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
         chooseWord(request.word);
       })
       .on("broadcast", { event: "guess" }, ({ payload }) => {
-        applyGuess(payload as GuessPayload);
+        const nextGuess = payload as GuessPayload;
+        showGuessToPainter(nextGuess);
+        applyGuess(nextGuess);
+      })
+      .on("broadcast", { event: "new_guess" }, ({ payload }) => {
+        ingestChat(payload as DrawChatMessage);
       })
       .on("broadcast", { event: "chat" }, ({ payload }) => {
-        const message = payload as DrawChatMessage;
-        setChat((current) => [...current.slice(-40), message]);
+        ingestChat(payload as DrawChatMessage);
       })
       .on("broadcast", { event: "vote_kick" }, ({ payload }) => {
         const vote = payload as { targetId: string; fromId: string };
@@ -615,8 +697,8 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
       text,
     };
     setGuess("");
+    send("guess", payload);
     if (isHostRef.current) hostApiRef.current?.applyGuess(payload);
-    else send("guess", payload);
   }
 
   function pickWord(word: string) {
@@ -658,40 +740,44 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
     (round.phase === "draw" || (round.phase === "warn" && !isPainter));
 
   return (
-    <div className="fixed inset-0 z-[80] flex justify-center bg-background">
-      <div className="relative flex h-[100dvh] max-h-[100dvh] w-full max-w-md flex-col overflow-hidden px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-safe">
-        <header className="flex shrink-0 items-center gap-2">
-          <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
-              {isCafe ? copy.publicRoomBadge : copy.roomCode.replace("{pin}", pin ?? "")}
-            </p>
-            <h1 className="truncate font-display text-xl text-ink">{copy.title}</h1>
-          </div>
-          {painter && round.phase !== "lobby" ? (
-            <p className="shrink-0 text-xs font-medium text-muted">
-              {painter.avatar} {painter.nickname}
-            </p>
+    <div
+      ref={shellRef}
+      className="fixed inset-x-0 top-0 z-[80] flex h-[100dvh] max-h-[100dvh] justify-center overflow-hidden bg-background"
+    >
+      <div className="relative flex h-full max-h-full w-full max-w-md select-none flex-col overflow-hidden bg-background">
+        <div className="shrink-0 pt-[max(0.35rem,env(safe-area-inset-top))]">
+          <header className="flex h-11 max-h-[55px] items-center gap-2 px-3">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
+                {isCafe ? copy.publicRoomBadge : copy.roomCode.replace("{pin}", pin ?? "")}
+              </p>
+              <p className="truncate font-display text-sm leading-tight text-ink">
+                {copy.title}
+                {painter && round.phase !== "lobby"
+                  ? ` · ${painter.avatar} ${painter.nickname}`
+                  : ""}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onExit}
+              aria-label={copy.leave}
+              className="flex size-9 items-center justify-center rounded-full bg-surface text-ink"
+            >
+              <X className="size-4" />
+            </button>
+          </header>
+          {round.phase !== "lobby" ? (
+            <div className="mx-3 h-1 overflow-hidden rounded-full bg-surface">
+              <div
+                className="h-full rounded-full bg-primary transition-[width] duration-100"
+                style={{ width: `${Math.min(100, (remaining / totalMs) * 100)}%` }}
+              />
+            </div>
           ) : null}
-          <button
-            type="button"
-            onClick={onExit}
-            aria-label={copy.leave}
-            className="flex size-10 items-center justify-center rounded-full bg-surface text-ink"
-          >
-            <X className="size-4" />
-          </button>
-        </header>
+        </div>
 
-        {round.phase !== "lobby" ? (
-          <div className="mt-2 h-1.5 shrink-0 overflow-hidden rounded-full bg-surface">
-            <div
-              className="h-full rounded-full bg-primary transition-[width] duration-100"
-              style={{ width: `${Math.min(100, (remaining / totalMs) * 100)}%` }}
-            />
-          </div>
-        ) : null}
-
-        <main className="mt-2 flex min-h-0 flex-1 flex-col">
+        <main className="flex min-h-0 flex-1 flex-col px-3 pt-2">
           {!connected ? (
             <WaitPulse title={supabase ? copy.connecting : copy.unavailable} />
           ) : round.phase === "lobby" ? (
@@ -786,25 +872,31 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
               </ol>
             </motion.div>
           ) : showBoard ? (
-            <>
+            <div
+              className={
+                isPainter
+                  ? "grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto_minmax(8.5rem,1.15fr)]"
+                  : "grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)_minmax(8.5rem,1.15fr)]"
+              }
+            >
               {isPainter ? (
-                <p className="mb-2 shrink-0 rounded-xl bg-primary/10 px-3 py-2 text-center text-sm font-medium text-ink">
+                <p className="mb-1.5 shrink-0 truncate rounded-xl bg-primary/10 px-3 py-1.5 text-center text-xs font-medium text-ink">
                   {copy.secretWord.replace("{word}", round.word ?? "")}
                 </p>
               ) : (
-                <p className="mb-2 shrink-0 text-center text-xs font-medium uppercase tracking-[0.14em] text-muted">
+                <p className="mb-1.5 shrink-0 text-center text-[10px] font-medium uppercase tracking-[0.14em] text-muted">
                   {round.phase === "warn" ? copy.painterPreparing : copy.guesser}
                 </p>
               )}
-              <div className="flex min-h-0 flex-1 items-center justify-center">
-                <div className="relative aspect-square h-full max-h-full w-auto max-w-full overflow-hidden rounded-2xl border border-primary/15">
+              <div className="flex min-h-0 items-center justify-center">
+                <div className="relative aspect-[4/3] h-full max-h-full w-auto max-w-full overflow-hidden rounded-2xl border-2 border-primary/20">
                   {!isPainter ? (
                     <button
                       type="button"
                       onClick={() => setVotePrompt(round.painterId)}
-                      className="absolute left-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-white/90 text-amber-600 shadow-sm"
+                      className="absolute left-2 top-2 z-10 flex size-8 items-center justify-center rounded-full bg-white/90 text-amber-600 shadow-sm"
                     >
-                      <AlertTriangle className="size-4" />
+                      <AlertTriangle className="size-3.5" />
                     </button>
                   ) : null}
                   <DrawCanvas
@@ -817,131 +909,149 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                 </div>
               </div>
               {isPainter ? (
-                <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2">
-                  {drawConfig.colors.map((swatch) => (
+                <div className="mt-2 flex shrink-0 items-center justify-between gap-2 rounded-xl bg-muted/60 px-3 py-1.5">
+                  <div className="flex items-center gap-1.5">
+                    {drawConfig.colors.map((swatch) => (
+                      <button
+                        key={swatch.id}
+                        type="button"
+                        aria-label={swatch.id}
+                        onClick={() => setColor(swatch.hex)}
+                        className={`size-6 rounded-full border-2 ${
+                          color === swatch.hex ? "border-ink" : "border-transparent"
+                        }`}
+                        style={{ background: swatch.hex }}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
                     <button
-                      key={swatch.id}
                       type="button"
-                      aria-label={swatch.id}
-                      onClick={() => setColor(swatch.hex)}
-                      className={`size-8 rounded-full border-2 ${
-                        color === swatch.hex ? "border-ink" : "border-transparent"
+                      onClick={() => setBrush("thin")}
+                      aria-label={copy.thinBrush}
+                      className={`flex size-7 items-center justify-center rounded-full ${
+                        brush === "thin" ? "bg-primary" : "bg-background"
                       }`}
-                      style={{ background: swatch.hex }}
-                    />
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setBrush("thin")}
-                    className={`rounded-full px-2 py-1 text-[10px] font-medium ${
-                      brush === "thin" ? "bg-primary text-on-primary" : "bg-surface"
-                    }`}
-                  >
-                    {copy.thinBrush}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBrush("thick")}
-                    className={`rounded-full px-2 py-1 text-[10px] font-medium ${
-                      brush === "thick" ? "bg-primary text-on-primary" : "bg-surface"
-                    }`}
-                  >
-                    {copy.thickBrush}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={undoBoard}
-                    aria-label={copy.undo}
-                    className="ml-auto flex size-9 items-center justify-center rounded-full bg-surface"
-                  >
-                    <Undo2 className="size-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={clearBoard}
-                    aria-label={copy.clear}
-                    className="flex size-9 items-center justify-center rounded-full bg-surface"
-                  >
-                    <Eraser className="size-4" />
-                  </button>
+                    >
+                      <span
+                        className={`block size-1.5 rounded-full ${
+                          brush === "thin" ? "bg-on-primary" : "bg-ink"
+                        }`}
+                      />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBrush("thick")}
+                      aria-label={copy.thickBrush}
+                      className={`flex size-7 items-center justify-center rounded-full ${
+                        brush === "thick" ? "bg-primary" : "bg-background"
+                      }`}
+                    >
+                      <span
+                        className={`block size-2.5 rounded-full ${
+                          brush === "thick" ? "bg-on-primary" : "bg-ink"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={undoBoard}
+                      aria-label={copy.undo}
+                      className="flex size-8 items-center justify-center rounded-full bg-background"
+                    >
+                      <Undo2 className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearBoard}
+                      aria-label={copy.clear}
+                      className="flex size-8 items-center justify-center rounded-full bg-background"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
                 </div>
-              ) : (
-                <section className="mt-2 flex h-[10.5rem] shrink-0 flex-col">
-                  <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted">
-                    {copy.chatTitle}
-                  </p>
-                  <ul
-                    ref={chatListRef}
-                    className="mt-1 min-h-0 flex-1 space-y-1 overflow-y-auto"
-                  >
-                    {chat.map((message) => {
-                      const isMuted = muted.includes(message.clientId);
-                      return (
-                        <li
-                          key={message.id}
-                          className={`flex items-start justify-between gap-2 rounded-xl px-2 py-1.5 text-xs ${
-                            !isMuted && message.kind === "correct"
-                              ? "bg-emerald-500/15 text-emerald-800"
-                              : "bg-surface text-ink"
-                          }`}
-                        >
-                          <span className={isMuted ? "italic text-muted" : undefined}>
-                            {isMuted
-                              ? `${message.nickname}`
-                              : message.kind === "correct"
-                                ? copy.correctBanner.replace("{nickname}", message.nickname)
-                                : `${message.avatar} ${message.nickname}: ${message.text}`}
-                          </span>
-                          {message.clientId !== player.clientId ? (
-                            <button
-                              type="button"
-                              onClick={() => toggleMute(message.clientId)}
-                              aria-label={isMuted ? copy.unmute : copy.mute}
-                              className="shrink-0 text-muted"
-                            >
-                              {isMuted ? (
-                                <VolumeX className="size-3.5" />
-                              ) : (
-                                <Volume2 className="size-3.5" />
-                              )}
-                            </button>
-                          ) : null}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                  {round.phase === "draw" ? (
-                    alreadyCorrect ? (
-                      <p className="mt-2 text-center text-xs font-medium text-muted">
-                        {copy.lockedGuess}
-                      </p>
-                    ) : (
-                      <form
-                        className="mt-2 flex gap-2"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          submitGuess();
-                        }}
+              ) : null}
+              <section className="mt-2 flex h-full min-h-0 flex-col overflow-hidden">
+                <p className="shrink-0 text-[10px] font-medium uppercase tracking-[0.14em] text-muted">
+                  {copy.chatTitle}
+                </p>
+                <ul
+                  ref={chatListRef}
+                  className="min-h-0 flex-1 space-y-1 overflow-y-auto rounded-xl bg-surface/50 p-2"
+                >
+                  {chat.map((message) => {
+                    const isMuted = muted.includes(message.clientId);
+                    return (
+                      <li
+                        key={message.id}
+                        className={`flex items-start justify-between gap-2 rounded-xl px-2 py-1.5 text-xs ${
+                          !isMuted && message.kind === "correct"
+                            ? "bg-emerald-500/15 text-emerald-800"
+                            : "bg-surface text-ink"
+                        }`}
                       >
-                        <input
-                          value={guess}
-                          onChange={(event) => setGuess(event.target.value)}
-                          placeholder={copy.guessPlaceholder}
-                          className="field-input min-h-11 flex-1 text-sm"
-                        />
-                        <button
-                          type="submit"
-                          aria-label={copy.guessSend}
-                          className="btn-primary min-h-11 px-3"
-                        >
-                          <Send className="size-4" />
-                        </button>
-                      </form>
-                    )
-                  ) : null}
-                </section>
-              )}
-            </>
+                        <span className={isMuted ? "italic text-muted" : undefined}>
+                          {isMuted
+                            ? `${message.nickname}`
+                            : message.kind === "correct"
+                              ? copy.correctBanner.replace("{nickname}", message.nickname)
+                              : `${message.avatar} ${message.nickname}: ${message.text}`}
+                        </span>
+                        {message.clientId !== player.clientId ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleMute(message.clientId)}
+                            aria-label={isMuted ? copy.unmute : copy.mute}
+                            className="shrink-0 text-muted"
+                          >
+                            {isMuted ? (
+                              <VolumeX className="size-3.5" />
+                            ) : (
+                              <Volume2 className="size-3.5" />
+                            )}
+                          </button>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                  <li ref={chatEndRef} aria-hidden className="h-px" />
+                </ul>
+                {isPainter ? (
+                  <p className="shrink-0 rounded-xl bg-surface px-3 py-2 text-center text-xs font-medium text-muted pb-safe">
+                    {copy.waitingGuesses}
+                  </p>
+                ) : alreadyCorrect ? (
+                  <p className="shrink-0 rounded-xl bg-emerald-500/15 px-3 py-2 text-center text-xs font-medium text-emerald-800 pb-safe">
+                    {copy.lockedGuess}
+                  </p>
+                ) : round.phase === "draw" ? (
+                  <form
+                    className="sticky bottom-0 flex shrink-0 gap-2 border-t border-primary/10 bg-background/95 p-2 backdrop-blur pb-safe"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      submitGuess();
+                    }}
+                  >
+                    <input
+                      value={guess}
+                      onChange={(event) => setGuess(event.target.value)}
+                      placeholder={copy.guessPlaceholder}
+                      className="field-input min-h-11 flex-1 text-sm"
+                    />
+                    <button
+                      type="submit"
+                      aria-label={copy.guessSend}
+                      className="btn-primary min-h-11 px-3"
+                    >
+                      <Send className="size-4" />
+                    </button>
+                  </form>
+                ) : null}
+              </section>
+            </div>
           ) : null}
         </main>
 
