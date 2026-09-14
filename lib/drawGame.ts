@@ -7,7 +7,6 @@ export const DRAW_REVEAL_MS = 5_000;
 export const DRAW_OVER_MS = 10_000;
 export const DRAW_STROKE_MS = 40;
 export const DRAW_MIN_PLAYERS = 2;
-export const DRAW_PAINTER_BONUS = 50;
 export const DRAW_MAX_SNAPSHOT_STROKES = 80;
 
 export type DrawPhase = "lobby" | "pick" | "warn" | "draw" | "reveal" | "over";
@@ -141,8 +140,12 @@ export function pickDrawWords(count = 3): string[] {
 }
 
 export function guessPointsForIndex(index: number): number {
-  const ladder = [100, 80, 60, 40, 20];
-  return ladder[index] ?? 10;
+  const ladder = tenantConfig.duel.draw.guessPoints;
+  return ladder[index] ?? ladder[ladder.length - 1] ?? 5;
+}
+
+export function drawPainterBonus(): number {
+  return tenantConfig.duel.draw.painterBonus;
 }
 
 export function kickThreshold(playerCount: number): number {
@@ -153,24 +156,17 @@ export function drawWinScore(): number {
   return tenantConfig.duel.draw.winScore;
 }
 
-export function formatDrawHint(word: string, extraCount: number): string {
-  const letters = [...word];
-  let extras = extraCount;
-  let firstShown = false;
+export function formatDrawHint(word: string, revealedCount: number): string {
+  let left = revealedCount;
   const out: string[] = [];
-  for (const char of letters) {
+  for (const char of [...word]) {
     if (char === " ") {
       out.push(" ");
       continue;
     }
-    if (!firstShown) {
+    if (left > 0) {
       out.push(char.toLocaleUpperCase("tr-TR"));
-      firstShown = true;
-      continue;
-    }
-    if (extras > 0) {
-      out.push(char.toLocaleUpperCase("tr-TR"));
-      extras -= 1;
+      left -= 1;
     } else {
       out.push("_");
     }
@@ -179,11 +175,10 @@ export function formatDrawHint(word: string, extraCount: number): string {
 }
 
 export function extraHintCount(elapsedRatio: number, letterCount: number): number {
-  let extra = 0;
-  if (elapsedRatio >= 0.75) extra = 3;
-  else if (elapsedRatio >= 0.5) extra = 2;
-  else if (elapsedRatio >= 0.33) extra = 1;
-  return Math.min(extra, Math.max(0, letterCount - 2));
+  let revealed = 0;
+  if (elapsedRatio >= 0.5) revealed = 1;
+  if (elapsedRatio >= 0.82) revealed = 2;
+  return Math.min(revealed, Math.max(0, letterCount - 1));
 }
 
 export function wordLetterCount(word: string): number {

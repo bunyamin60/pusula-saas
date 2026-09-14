@@ -15,7 +15,6 @@ import {
   DRAW_MAX_SNAPSHOT_STROKES,
   DRAW_MIN_PLAYERS,
   DRAW_OVER_MS,
-  DRAW_PAINTER_BONUS,
   DRAW_PICK_MS,
   DRAW_REVEAL_MS,
   DRAW_TURN_MS,
@@ -36,6 +35,7 @@ import {
   pinFromRoomId,
   withOccupantScores,
   wordLetterCount,
+  drawPainterBonus,
   type DrawChatMessage,
   type DrawOccupant,
   type DrawRoundState,
@@ -81,6 +81,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
   const [muted, setMuted] = useState<string[]>([]);
   const [votePrompt, setVotePrompt] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
+  const [leaveOpen, setLeaveOpen] = useState(false);
   const [voteTally, setVoteTally] = useState<VoteTally | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [socketEpoch, setSocketEpoch] = useState(0);
@@ -366,7 +367,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
       const scores = { ...current.scores };
       if (current.painterId && current.correctIds.length > 0) {
         scores[current.painterId] =
-          (scores[current.painterId] ?? 0) + DRAW_PAINTER_BONUS;
+          (scores[current.painterId] ?? 0) + drawPainterBonus();
       }
       const topScore = Math.max(0, ...Object.values(scores));
       if (topScore >= drawWinScore()) {
@@ -878,15 +879,16 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
   const skippedTurn = round.phase === "reveal" && strokes.length === 0;
   const nobodyGuessed = round.phase === "reveal" && round.correctIds.length === 0;
   const showChrome = connected && round.phase !== "lobby";
-  const hint =
+  const hintLetters =
     !isPainter && round.phase === "draw" && round.word
-      ? formatDrawHint(
-          round.word,
-          extraHintCount(
-            totalMs > 0 ? 1 - remaining / totalMs : 0,
-            wordLetterCount(round.word),
-          ),
+      ? extraHintCount(
+          totalMs > 0 ? 1 - remaining / totalMs : 0,
+          wordLetterCount(round.word),
         )
+      : 0;
+  const hint =
+    hintLetters > 0 && round.word
+      ? formatDrawHint(round.word, hintLetters)
       : null;
   const answers = chat.filter(
     (message) =>
@@ -929,7 +931,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
             </div>
             <button
               type="button"
-              onClick={onExit}
+              onClick={() => setLeaveOpen(true)}
               aria-label={copy.leave}
               className="flex size-9 items-center justify-center rounded-full bg-surface text-ink"
             >
@@ -971,6 +973,9 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
               </p>
               <p className="mt-2 text-xs font-medium tracking-wide text-muted">
                 {copy.insideCount.replace("{count}", String(occupants.length))}
+              </p>
+              <p className="mt-1 text-xs font-medium tracking-wide text-primary">
+                {copy.scoreGoal.replace("{score}", String(drawWinScore()))}
               </p>
             </div>
           ) : (
@@ -1317,6 +1322,31 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
           </div>
         ) : null}
 
+        {leaveOpen ? (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-ink/50 px-6">
+            <div className="w-full max-w-xs rounded-2xl bg-background p-5 text-center">
+              <p className="font-display text-lg text-ink">{copy.leave}</p>
+              <p className="mt-2 text-sm font-medium text-ink">{copy.leaveConfirm}</p>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLeaveOpen(false)}
+                  className="btn-secondary min-h-11 text-sm"
+                >
+                  {copy.leaveNo}
+                </button>
+                <button
+                  type="button"
+                  onClick={onExit}
+                  className="btn-primary min-h-11 text-sm"
+                >
+                  {copy.leaveYes}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {reportOpen && round.painterId ? (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-ink/50 px-6">
             <div className="w-full max-w-xs rounded-2xl bg-background p-5 text-center">
@@ -1418,16 +1448,18 @@ function NextPainterCard({
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="m-auto flex flex-col items-center px-4 text-center"
+      className="m-auto mx-4 max-w-sm rounded-3xl bg-primary px-5 py-7 text-center shadow-lift"
     >
-      <p className="font-display text-2xl text-ink">{title}</p>
+      <p className="font-display text-2xl text-on-primary">{title}</p>
       <p className="mt-4 text-5xl" aria-hidden>
         {painter?.avatar ?? "☕"}
       </p>
-      <p className="mt-3 text-xs font-medium uppercase tracking-[0.16em] text-muted">{label}</p>
-      <p className="font-display text-2xl text-ink">{painter?.nickname ?? ""}</p>
+      <p className="mt-3 text-xs font-bold uppercase tracking-[0.16em] text-on-primary/80">
+        {label}
+      </p>
+      <p className="font-display text-2xl text-on-primary">{painter?.nickname ?? ""}</p>
       {lastWord ? (
-        <p className="mt-3 text-xs font-medium text-primary">{lastWord}</p>
+        <p className="mt-3 text-xs font-medium text-on-primary/90">{lastWord}</p>
       ) : null}
     </motion.div>
   );
@@ -1545,6 +1577,9 @@ function PodiumStage({
           {copy.winnerLine.replace("{nickname}", first.nickname)}
         </p>
       ) : null}
+      <p className="mt-1 text-[10px] font-medium text-muted">
+        {copy.scoreGoal.replace("{score}", String(drawWinScore()))}
+      </p>
     </motion.div>
   );
 }
