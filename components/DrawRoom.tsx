@@ -14,14 +14,18 @@ import { tenantConfig } from "@/config/tenant.config";
 import {
   DRAW_MAX_SNAPSHOT_STROKES,
   DRAW_MIN_PLAYERS,
+  DRAW_OVER_MS,
   DRAW_PAINTER_BONUS,
   DRAW_PICK_MS,
   DRAW_REVEAL_MS,
   DRAW_TURN_MS,
   DRAW_WARN_MS,
   cafeDrawRoomId,
+  drawWinScore,
   electDrawHost,
   emptyDrawRound,
+  extraHintCount,
+  formatDrawHint,
   guessPointsForIndex,
   isFuzzyMatch,
   kickThreshold,
@@ -31,6 +35,7 @@ import {
   pickDrawWords,
   pinFromRoomId,
   withOccupantScores,
+  wordLetterCount,
   type DrawChatMessage,
   type DrawOccupant,
   type DrawRoundState,
@@ -75,6 +80,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
   const [brush, setBrush] = useState<"thin" | "thick">("thin");
   const [muted, setMuted] = useState<string[]>([]);
   const [votePrompt, setVotePrompt] = useState<string | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
   const [voteTally, setVoteTally] = useState<VoteTally | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [socketEpoch, setSocketEpoch] = useState(0);
@@ -362,6 +368,17 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
         scores[current.painterId] =
           (scores[current.painterId] ?? 0) + DRAW_PAINTER_BONUS;
       }
+      const topScore = Math.max(0, ...Object.values(scores));
+      if (topScore >= drawWinScore()) {
+        publishRound({
+          ...current,
+          phase: "over",
+          scores,
+          endsAt: Date.now() + DRAW_OVER_MS,
+        });
+        schedule(DRAW_OVER_MS, beginNewMatch);
+        return;
+      }
       publishRound({
         ...current,
         phase: "reveal",
@@ -369,6 +386,30 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
         endsAt: Date.now() + DRAW_REVEAL_MS,
       });
       schedule(DRAW_REVEAL_MS, beginPick);
+    }
+
+    function beginOver() {
+      const current = roundRef.current;
+      if (current.phase !== "reveal") return;
+      publishRound({
+        ...current,
+        phase: "over",
+        endsAt: Date.now() + DRAW_OVER_MS,
+      });
+      schedule(DRAW_OVER_MS, beginNewMatch);
+    }
+
+    function beginNewMatch() {
+      roundRef.current = {
+        ...emptyDrawRound(),
+        scores: {},
+        round: 0,
+      };
+      if (occupantsRef.current.length >= DRAW_MIN_PLAYERS) {
+        beginPick();
+        return;
+      }
+      publishRound(emptyDrawRound());
     }
 
     function maybeRevealEarly() {
@@ -499,13 +540,22 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
         if (current.phase === "pick") autoPick();
         else if (current.phase === "warn") beginDraw();
         else if (current.phase === "draw") beginReveal();
+        else if (current.phase === "reveal") {
+          const topScore = Math.max(0, ...Object.values(current.scores));
+          if (topScore >= drawWinScore()) beginOver();
+          else beginPick();
+        } else if (current.phase === "over") beginNewMatch();
         else beginPick();
         return;
       }
       if (current.phase === "pick") schedule(remaining, autoPick);
       if (current.phase === "warn") schedule(remaining, beginDraw);
       if (current.phase === "draw") schedule(remaining, beginReveal);
-      if (current.phase === "reveal") schedule(remaining, beginPick);
+      if (current.phase === "reveal") {
+        const topScore = Math.max(0, ...Object.values(current.scores));
+        schedule(remaining, topScore >= drawWinScore() ? beginOver : beginPick);
+      }
+      if (current.phase === "over") schedule(remaining, beginNewMatch);
     }
 
     hostApiRef.current = { chooseWord, applyGuess, applyVote };
@@ -821,11 +871,23 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
           ? DRAW_TURN_MS
           : round.phase === "reveal"
             ? DRAW_REVEAL_MS
+            : round.phase === "over"
+              ? DRAW_OVER_MS
             : 1;
 
   const skippedTurn = round.phase === "reveal" && strokes.length === 0;
   const nobodyGuessed = round.phase === "reveal" && round.correctIds.length === 0;
   const showChrome = connected && round.phase !== "lobby";
+  const hint =
+    !isPainter && round.phase === "draw" && round.word
+      ? formatDrawHint(
+          round.word,
+          extraHintCount(
+            totalMs > 0 ? 1 - remaining / totalMs : 0,
+            wordLetterCount(round.word),
+          ),
+        )
+      : null;
   const answers = chat.filter(
     (message) =>
       message.kind === "wrong" ||
@@ -918,6 +980,15 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                   <p className="pointer-events-none absolute left-2 right-2 top-2 z-10 truncate rounded-xl bg-primary/90 px-3 py-1 text-center text-[11px] font-medium text-on-primary">
                     {copy.secretWord.replace("{word}", round.word ?? "")}
                   </p>
+                ) : hint ? (
+                  <div className="pointer-events-none absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-xl bg-ink px-3 py-1.5 text-center">
+                    <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-background/70">
+                      {copy.hintLabel}
+                    </p>
+                    <p className="font-display text-lg tracking-[0.18em] text-background">
+                      {hint}
+                    </p>
+                  </div>
                 ) : null}
                 {round.phase === "pick" && isPainter ? (
                   <div className="m-auto grid w-full max-w-sm gap-2 px-3">
@@ -948,10 +1019,21 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                   <motion.div
                     initial={{ opacity: 0, scale: 0.94 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="m-auto px-6 text-center"
+                    className="m-auto mx-4 max-w-sm rounded-3xl bg-primary px-5 py-7 text-center shadow-lift"
                   >
-                    <p className="font-display text-2xl leading-snug text-ink">{copy.warnTitle}</p>
+                    <p className="text-4xl leading-none" aria-hidden>
+                      🚫
+                    </p>
+                    <p className="mt-3 font-display text-xl font-semibold leading-snug text-on-primary">
+                      {copy.warnTitle}
+                    </p>
                   </motion.div>
+                ) : round.phase === "over" ? (
+                  <PodiumStage
+                    places={ranked.slice(0, 3)}
+                    scores={round.scores}
+                    copy={copy}
+                  />
                 ) : round.phase === "reveal" ? (
                   <IntermissionStage
                     skipped={skippedTurn}
@@ -1080,11 +1162,11 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                   </aside>
                   <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-surface/80">
                     <div className="flex shrink-0 items-center gap-1 px-2 pt-1.5">
-                      {!isPainter ? (
+                      {!isPainter && round.painterId ? (
                         <button
                           type="button"
-                          onClick={() => setVotePrompt(round.painterId)}
-                          aria-label={copy.voteKick}
+                          onClick={() => setReportOpen(true)}
+                          aria-label={copy.reportDrawing}
                           className="flex size-8 items-center justify-center rounded-xl bg-primary/15 text-primary"
                         >
                           <AlertTriangle className="size-3.5" />
@@ -1187,7 +1269,11 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                       </form>
                     ) : (
                       <p className="shrink-0 px-2 py-2 text-center text-[11px] font-medium text-muted">
-                        {round.phase === "reveal" ? copy.intermission : copy.drawingWait}
+                        {round.phase === "over"
+                          ? copy.gameOver
+                          : round.phase === "reveal"
+                            ? copy.intermission
+                            : copy.drawingWait}
                       </p>
                     )}
                   </section>
@@ -1228,6 +1314,37 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                 ))
               )}
             </ul>
+          </div>
+        ) : null}
+
+        {reportOpen && round.painterId ? (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-ink/50 px-6">
+            <div className="w-full max-w-xs rounded-2xl bg-background p-5 text-center">
+              <p className="mx-auto flex size-14 items-center justify-center rounded-full bg-primary/15 text-2xl text-primary">
+                !
+              </p>
+              <p className="mt-3 text-sm font-medium text-ink">{copy.reportDrawing}</p>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setReportOpen(false)}
+                  className="btn-secondary min-h-11 text-sm"
+                >
+                  {copy.reportNo}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = round.painterId;
+                    setReportOpen(false);
+                    if (target) voteKick(target);
+                  }}
+                  className="btn-primary min-h-11 text-sm"
+                >
+                  {copy.reportYes}
+                </button>
+              </div>
+            </div>
           </div>
         ) : null}
 
@@ -1331,38 +1448,143 @@ function IntermissionStage({
   guessedCount: number;
   copy: typeof tenantConfig.copy.duel.draw;
 }) {
-  const sad = skipped || nobodyGuessed;
+  if (skipped) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="m-auto flex flex-col items-center px-4 text-center"
+      >
+        <p className="font-display text-2xl text-ink">{copy.skippedTitle}</p>
+        <span className="draw-sad-icon mt-3 text-5xl" aria-hidden>
+          😢☕
+        </span>
+        <p className="mt-3 text-sm font-medium text-muted">
+          {copy.skippedLead.replace("{nickname}", painterName)}
+        </p>
+      </motion.div>
+    );
+  }
+
+  if (nobodyGuessed) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="m-auto flex flex-col items-center px-4 text-center"
+      >
+        <p className="font-display text-2xl text-ink">{copy.intermission}</p>
+        <p className="mt-1 text-sm font-medium text-muted">{copy.restLead}</p>
+        <div className="draw-sad-icon mt-4 text-5xl" aria-hidden>
+          🎨☕
+        </div>
+        <p className="mt-4 font-display text-lg text-ink">{copy.nobodyGuessed}</p>
+      </motion.div>
+    );
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       className="m-auto flex flex-col items-center px-4 text-center"
     >
-      <p className="font-display text-2xl text-ink">
-        {skipped ? copy.skippedTitle : copy.intermission}
-      </p>
-      <span
-        className={`${sad ? "draw-sad-icon" : "draw-wait-icon"} mt-3 text-5xl`}
-        aria-hidden
-      >
-        {sad ? "😢☕" : "☕"}
+      <p className="font-display text-2xl text-ink">{copy.intermission}</p>
+      <p className="mt-1 text-sm font-medium text-muted">{copy.restLead}</p>
+      <span className="draw-wait-icon mt-3 text-5xl" aria-hidden>
+        ☕
       </span>
-      <p className="mt-3 text-sm font-medium text-muted">
-        {skipped
-          ? copy.skippedLead.replace("{nickname}", painterName)
-          : copy.restLead}
-      </p>
       <p className="mt-2 font-display text-2xl text-ink">
         {copy.wordReveal.replace("{word}", word)}
       </p>
-      {!skipped ? (
-        <p className="mt-1 text-xs font-medium text-muted">
-          {nobodyGuessed
-            ? copy.nobodyGuessed
-            : copy.guessedCount.replace("{count}", String(guessedCount))}
+      <p className="mt-1 text-xs font-medium text-muted">
+        {copy.guessedCount.replace("{count}", String(guessedCount))}
+      </p>
+    </motion.div>
+  );
+}
+
+function PodiumStage({
+  places,
+  scores,
+  copy,
+}: {
+  places: DrawOccupant[];
+  scores: Record<string, number>;
+  copy: typeof tenantConfig.copy.duel.draw;
+}) {
+  const first = places[0];
+  const second = places[1];
+  const third = places[2];
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="m-auto flex w-full flex-col items-center px-3 text-center"
+    >
+      <p className="font-display text-2xl text-ink">{copy.gameOver}</p>
+      <div className="mt-5 flex w-full items-end justify-center gap-2">
+        <PodiumSeat
+          occupant={second}
+          score={second ? scores[second.clientId] ?? 0 : 0}
+          place={2}
+        />
+        <PodiumSeat
+          occupant={first}
+          score={first ? scores[first.clientId] ?? 0 : 0}
+          place={1}
+        />
+        <PodiumSeat
+          occupant={third}
+          score={third ? scores[third.clientId] ?? 0 : 0}
+          place={3}
+        />
+      </div>
+      {first ? (
+        <p className="mt-3 text-xs font-medium text-muted">
+          {copy.winnerLine.replace("{nickname}", first.nickname)}
         </p>
       ) : null}
     </motion.div>
+  );
+}
+
+function PodiumSeat({
+  occupant,
+  score,
+  place,
+}: {
+  occupant?: DrawOccupant;
+  score: number;
+  place: 1 | 2 | 3;
+}) {
+  if (!occupant) return <div className="w-[4.5rem]" />;
+  const medal =
+    place === 1 ? "bg-amber-400 text-ink" : place === 2 ? "bg-zinc-300 text-ink" : "bg-amber-700 text-background";
+  return (
+    <div className={`flex flex-col items-center ${place === 1 ? "-translate-y-2" : ""}`}>
+      <div
+        className={`relative flex items-center justify-center rounded-full bg-surface ${
+          place === 1 ? "size-20 text-4xl" : "size-14 text-2xl"
+        }`}
+      >
+        {place === 1 ? (
+          <span className="pointer-events-none absolute -inset-x-3 top-1 text-center text-lg text-emerald-700">
+            ❋
+          </span>
+        ) : null}
+        <span aria-hidden>{occupant.avatar}</span>
+        <span
+          className={`absolute -bottom-1 left-1/2 flex size-6 -translate-x-1/2 items-center justify-center rounded-full text-[11px] font-bold ${medal}`}
+        >
+          {place}
+        </span>
+      </div>
+      <p className="mt-2 max-w-[5.5rem] truncate text-xs font-medium text-ink">
+        {occupant.nickname}
+      </p>
+      <p className="text-[10px] text-muted">{score}</p>
+    </div>
   );
 }
 

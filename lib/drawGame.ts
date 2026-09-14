@@ -4,12 +4,13 @@ export const DRAW_PICK_MS = 5_000;
 export const DRAW_WARN_MS = 3_000;
 export const DRAW_TURN_MS = 60_000;
 export const DRAW_REVEAL_MS = 5_000;
+export const DRAW_OVER_MS = 10_000;
 export const DRAW_STROKE_MS = 40;
 export const DRAW_MIN_PLAYERS = 2;
 export const DRAW_PAINTER_BONUS = 50;
 export const DRAW_MAX_SNAPSHOT_STROKES = 80;
 
-export type DrawPhase = "lobby" | "pick" | "warn" | "draw" | "reveal";
+export type DrawPhase = "lobby" | "pick" | "warn" | "draw" | "reveal" | "over";
 
 export type DrawOccupant = {
   clientId: string;
@@ -146,6 +147,47 @@ export function guessPointsForIndex(index: number): number {
 
 export function kickThreshold(playerCount: number): number {
   return Math.max(2, Math.ceil(playerCount * 0.5));
+}
+
+export function drawWinScore(): number {
+  return tenantConfig.duel.draw.winScore;
+}
+
+export function formatDrawHint(word: string, extraCount: number): string {
+  const letters = [...word];
+  let extras = extraCount;
+  let firstShown = false;
+  const out: string[] = [];
+  for (const char of letters) {
+    if (char === " ") {
+      out.push(" ");
+      continue;
+    }
+    if (!firstShown) {
+      out.push(char.toLocaleUpperCase("tr-TR"));
+      firstShown = true;
+      continue;
+    }
+    if (extras > 0) {
+      out.push(char.toLocaleUpperCase("tr-TR"));
+      extras -= 1;
+    } else {
+      out.push("_");
+    }
+  }
+  return out.join(" ");
+}
+
+export function extraHintCount(elapsedRatio: number, letterCount: number): number {
+  let extra = 0;
+  if (elapsedRatio >= 0.75) extra = 3;
+  else if (elapsedRatio >= 0.5) extra = 2;
+  else if (elapsedRatio >= 0.33) extra = 1;
+  return Math.min(extra, Math.max(0, letterCount - 2));
+}
+
+export function wordLetterCount(word: string): number {
+  return [...word].filter((char) => char.trim() !== "").length;
 }
 
 export function normalizeGuess(value: string): string {
