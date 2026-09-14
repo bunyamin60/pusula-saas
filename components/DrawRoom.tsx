@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { motion } from "framer-motion";
-import { AlertTriangle, Send, Trash2, Undo2, Volume2, VolumeX, X } from "lucide-react";
+import { AlertTriangle, ScrollText, Send, Trash2, Undo2, Volume2, VolumeX, X } from "lucide-react";
 import { DrawCanvas } from "@/components/DrawCanvas";
 import { tenantConfig } from "@/config/tenant.config";
 import {
@@ -78,6 +78,8 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
   const [voteTally, setVoteTally] = useState<VoteTally | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [socketEpoch, setSocketEpoch] = useState(0);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [lastWord, setLastWord] = useState<string | null>(null);
 
   const channelRef = useRef<ReturnType<NonNullable<typeof supabase>["channel"]> | null>(
     null,
@@ -94,6 +96,11 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const chatListRef = useRef<HTMLUListElement | null>(null);
   const chatEndRef = useRef<HTMLLIElement | null>(null);
+  const copyRef = useRef(copy);
+
+  useEffect(() => {
+    copyRef.current = copy;
+  }, [copy]);
 
   useEffect(() => {
     onExitRef.current = onExit;
@@ -201,15 +208,27 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
     function ingestChat(message: DrawChatMessage) {
       if (!message?.id || !message.clientId) return;
       setChat((current) => {
-        const duplicate = current.some(
-          (entry) =>
-            entry.id === message.id ||
-            (entry.clientId === message.clientId &&
+        const sameId = current.some((entry) => entry.id === message.id);
+        if (sameId) return current;
+        if (message.kind === "wrong" || message.kind === "correct") {
+          const duplicate = current.some(
+            (entry) =>
+              entry.clientId === message.clientId &&
               entry.kind === message.kind &&
-              (entry.text ?? "") === (message.text ?? "")),
-        );
-        if (duplicate) return current;
+              (entry.text ?? "") === (message.text ?? ""),
+          );
+          if (duplicate) return current;
+        }
         return [...current.slice(-40), message];
+      });
+    }
+
+    function publishLog(message: DrawChatMessage) {
+      ingestChat(message);
+      void channel.send({
+        type: "broadcast",
+        event: "room_log",
+        payload: message,
       });
     }
 
@@ -324,6 +343,20 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
     function beginReveal() {
       const current = roundRef.current;
       if (current.phase !== "draw") return;
+      if (strokesRef.current.length === 0 && current.painterId) {
+        const skipped =
+          occupantsRef.current.find((entry) => entry.clientId === current.painterId) ??
+          null;
+        if (skipped) {
+          publishLog({
+            id: `skip-${current.painterId}-${Date.now()}`,
+            kind: "skip",
+            clientId: skipped.clientId,
+            nickname: skipped.nickname,
+            avatar: skipped.avatar,
+          });
+        }
+      }
       const scores = { ...current.scores };
       if (current.painterId && current.correctIds.length > 0) {
         scores[current.painterId] =
@@ -401,20 +434,48 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
 
     function applyVote(targetId: string, fromId: string) {
       if (targetId === fromId) return;
-      const currentVotes = new Set(votesRef.current[targetId] ?? []);
+      const previousVotes = votesRef.current[targetId] ?? [];
+      const already = previousVotes.includes(fromId);
+      const currentVotes = new Set(previousVotes);
       currentVotes.add(fromId);
       votesRef.current[targetId] = [...currentVotes];
       const need = kickThreshold(occupantsRef.current.length);
       const votes = currentVotes.size;
       setVoteTally({ targetId, votes, need });
+      if (!already) {
+        const from = occupantsRef.current.find((entry) => entry.clientId === fromId);
+        const target = occupantsRef.current.find((entry) => entry.clientId === targetId);
+        if (from && target) {
+          ingestChat({
+            id: `vote-${fromId}-${targetId}-${Date.now()}`,
+            kind: "vote",
+            clientId: from.clientId,
+            nickname: from.nickname,
+            avatar: from.avatar,
+            targetId: target.clientId,
+            targetName: target.nickname,
+          });
+        }
+      }
       if (isHostRef.current && votes >= need) {
+        const kicked = occupantsRef.current.find((entry) => entry.clientId === targetId);
+        if (kicked) {
+          publishLog({
+            id: `kicked-${targetId}-${Date.now()}`,
+            kind: "leave",
+            clientId: kicked.clientId,
+            nickname: kicked.nickname,
+            avatar: kicked.avatar,
+            text: "kicked",
+          });
+        }
         void channel.send({
           type: "broadcast",
           event: "kicked",
           payload: { clientId: targetId },
         });
         if (targetId === player.clientId) {
-          setNotice(copy.kicked);
+          setNotice(copyRef.current.kicked);
           window.setTimeout(() => onExitRef.current(), 1400);
         }
       }
@@ -452,7 +513,8 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
     channel
       .on("presence", { event: "sync" }, () => {
         const state = channel.presenceState<DrawOccupant>();
-        const previousIds = new Set(occupantsRef.current.map((entry) => entry.clientId));
+        const previous = occupantsRef.current;
+        const previousIds = new Set(previous.map((entry) => entry.clientId));
         const next: DrawOccupant[] = [];
         const seen = new Set<string>();
         for (const entry of Object.values(state).flat()) {
@@ -466,6 +528,30 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
         }
         occupantsRef.current = next;
         setOccupants(next);
+
+        if (previousIds.size > 0) {
+          for (const person of next) {
+            if (previousIds.has(person.clientId)) continue;
+            ingestChat({
+              id: `join-${person.clientId}-${Date.now()}`,
+              kind: "join",
+              clientId: person.clientId,
+              nickname: person.nickname,
+              avatar: person.avatar,
+            });
+          }
+          for (const person of previous) {
+            if (next.some((entry) => entry.clientId === person.clientId)) continue;
+            ingestChat({
+              id: `leave-${person.clientId}-${Date.now()}`,
+              kind: "leave",
+              clientId: person.clientId,
+              nickname: person.nickname,
+              avatar: person.avatar,
+            });
+          }
+        }
+
         refreshHost();
         if (!isHostRef.current) return;
 
@@ -566,6 +652,9 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
       .on("broadcast", { event: "chat" }, ({ payload }) => {
         ingestChat(payload as DrawChatMessage);
       })
+      .on("broadcast", { event: "room_log" }, ({ payload }) => {
+        ingestChat(payload as DrawChatMessage);
+      })
       .on("broadcast", { event: "vote_kick" }, ({ payload }) => {
         const vote = payload as { targetId: string; fromId: string };
         applyVote(vote.targetId, vote.fromId);
@@ -573,7 +662,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
       .on("broadcast", { event: "kicked" }, ({ payload }) => {
         const kicked = payload as { clientId: string };
         if (kicked.clientId === player.clientId) {
-          setNotice(copy.kicked);
+          setNotice(copyRef.current.kicked);
           window.setTimeout(() => onExitRef.current(), 1400);
         }
       })
@@ -600,7 +689,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
       channelRef.current = null;
       void supabase.removeChannel(channel);
     };
-  }, [copy.kicked, player.clientId, roomId, socketEpoch, supabase]);
+  }, [player.clientId, roomId, socketEpoch, supabase]);
 
   useEffect(() => {
     function handleVisibility() {
@@ -734,10 +823,28 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
             ? DRAW_REVEAL_MS
             : 1;
 
-  const waitSeconds = Math.max(0, Math.ceil(remaining / 1000));
-  const showBoard =
-    connected &&
-    (round.phase === "draw" || (round.phase === "warn" && !isPainter));
+  const skippedTurn = round.phase === "reveal" && strokes.length === 0;
+  const nobodyGuessed = round.phase === "reveal" && round.correctIds.length === 0;
+  const showChrome = connected && round.phase !== "lobby";
+  const answers = chat.filter(
+    (message) =>
+      message.kind === "wrong" ||
+      message.kind === "correct" ||
+      message.kind === "vote" ||
+      message.kind === "skip",
+  );
+  const logs = chat.filter(
+    (message) =>
+      message.kind === "vote" ||
+      message.kind === "join" ||
+      message.kind === "leave" ||
+      message.kind === "skip" ||
+      message.kind === "system",
+  );
+
+  useEffect(() => {
+    if (round.phase === "reveal" && round.word) setLastWord(round.word);
+  }, [round.phase, round.word]);
 
   return (
     <div
@@ -777,7 +884,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
           ) : null}
         </div>
 
-        <main className="flex min-h-0 flex-1 flex-col px-3 pt-2">
+        <main className="flex min-h-0 flex-1 flex-col px-2 pt-1.5">
           {!connected ? (
             <WaitPulse title={supabase ? copy.connecting : copy.unavailable} />
           ) : round.phase === "lobby" ? (
@@ -804,256 +911,325 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                 {copy.insideCount.replace("{count}", String(occupants.length))}
               </p>
             </div>
-          ) : round.phase === "pick" && isPainter ? (
-            <div className="m-auto grid w-full gap-2">
-              <p className="text-center font-display text-xl text-ink">{copy.pickTitle}</p>
-              {round.options.map((word) => (
-                <button
-                  key={word}
-                  type="button"
-                  onClick={() => pickWord(word)}
-                  className="btn-secondary min-h-12"
-                >
-                  {word}
-                </button>
-              ))}
-            </div>
-          ) : round.phase === "pick" ? (
-            <WaitPulse
-              title={copy.nextPainter}
-              detail={
-                waitSeconds > 0
-                  ? copy.pickSeconds.replace("{seconds}", String(waitSeconds))
-                  : undefined
-              }
-            />
-          ) : round.phase === "warn" && isPainter ? (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.94 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="m-auto rounded-2xl bg-red-500/10 px-6 py-8 text-center"
-            >
-              <p className="font-display text-2xl leading-snug text-ink">{copy.warnTitle}</p>
-            </motion.div>
-          ) : round.phase === "reveal" ? (
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="m-auto flex w-full flex-col items-center text-center"
-            >
-              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">
-                {copy.intermission}
-              </p>
-              <p className="mt-2 font-display text-3xl text-ink">
-                {copy.wordWas.replace("{word}", round.word ?? "")}
-              </p>
-              <p className="mt-2 text-sm font-medium text-muted">
-                {round.correctIds.length === 0
-                  ? copy.nobodyGuessed
-                  : copy.guessedCount.replace(
-                      "{count}",
-                      String(round.correctIds.length),
-                    )}
-              </p>
-              <ol className="mt-5 w-full space-y-1.5 text-left">
-                {ranked.map((entry, index) => (
-                  <li
-                    key={entry.clientId}
-                    className="flex items-center justify-between rounded-xl bg-surface px-3 py-2 text-sm"
-                  >
-                    <span>
-                      #{index + 1} {entry.avatar} {entry.nickname}
-                    </span>
-                    <span className="font-display text-primary">
-                      {round.scores[entry.clientId] ?? 0}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            </motion.div>
-          ) : showBoard ? (
-            <div
-              className={
-                isPainter
-                  ? "grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto_minmax(8.5rem,1.15fr)]"
-                  : "grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)_minmax(8.5rem,1.15fr)]"
-              }
-            >
-              {isPainter ? (
-                <p className="mb-1.5 shrink-0 truncate rounded-xl bg-primary/10 px-3 py-1.5 text-center text-xs font-medium text-ink">
-                  {copy.secretWord.replace("{word}", round.word ?? "")}
-                </p>
-              ) : (
-                <p className="mb-1.5 shrink-0 text-center text-[10px] font-medium uppercase tracking-[0.14em] text-muted">
-                  {round.phase === "warn" ? copy.painterPreparing : copy.guesser}
-                </p>
-              )}
-              <div className="flex min-h-0 items-center justify-center">
-                <div className="relative aspect-[4/3] h-full max-h-full w-auto max-w-full overflow-hidden rounded-2xl border-2 border-primary/20">
-                  {!isPainter ? (
-                    <button
-                      type="button"
-                      onClick={() => setVotePrompt(round.painterId)}
-                      className="absolute left-2 top-2 z-10 flex size-8 items-center justify-center rounded-full bg-white/90 text-amber-600 shadow-sm"
-                    >
-                      <AlertTriangle className="size-3.5" />
-                    </button>
-                  ) : null}
-                  <DrawCanvas
-                    strokes={strokes}
-                    color={color}
-                    width={brushWidth}
-                    interactive={isPainter && round.phase === "draw"}
-                    onStroke={onStroke}
-                  />
-                </div>
-              </div>
-              {isPainter ? (
-                <div className="mt-2 flex shrink-0 items-center justify-between gap-2 rounded-xl bg-muted/60 px-3 py-1.5">
-                  <div className="flex items-center gap-1.5">
-                    {drawConfig.colors.map((swatch) => (
+          ) : (
+            <>
+              <section className="relative flex min-h-0 flex-[1.45] flex-col overflow-hidden rounded-2xl bg-white">
+                {isPainter && round.phase === "draw" ? (
+                  <p className="pointer-events-none absolute left-2 right-2 top-2 z-10 truncate rounded-xl bg-primary/90 px-3 py-1 text-center text-[11px] font-medium text-on-primary">
+                    {copy.secretWord.replace("{word}", round.word ?? "")}
+                  </p>
+                ) : null}
+                {round.phase === "pick" && isPainter ? (
+                  <div className="m-auto grid w-full max-w-sm gap-2 px-3">
+                    <p className="text-center font-display text-xl text-ink">{copy.pickTitle}</p>
+                    {round.options.map((word) => (
                       <button
-                        key={swatch.id}
+                        key={word}
                         type="button"
-                        aria-label={swatch.id}
-                        onClick={() => setColor(swatch.hex)}
-                        className={`size-6 rounded-full border-2 ${
-                          color === swatch.hex ? "border-ink" : "border-transparent"
-                        }`}
-                        style={{ background: swatch.hex }}
-                      />
+                        onClick={() => pickWord(word)}
+                        className="btn-secondary min-h-12"
+                      >
+                        {word}
+                      </button>
                     ))}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setBrush("thin")}
-                      aria-label={copy.thinBrush}
-                      className={`flex size-7 items-center justify-center rounded-full ${
-                        brush === "thin" ? "bg-primary" : "bg-background"
-                      }`}
-                    >
-                      <span
-                        className={`block size-1.5 rounded-full ${
-                          brush === "thin" ? "bg-on-primary" : "bg-ink"
-                        }`}
-                      />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBrush("thick")}
-                      aria-label={copy.thickBrush}
-                      className={`flex size-7 items-center justify-center rounded-full ${
-                        brush === "thick" ? "bg-primary" : "bg-background"
-                      }`}
-                    >
-                      <span
-                        className={`block size-2.5 rounded-full ${
-                          brush === "thick" ? "bg-on-primary" : "bg-ink"
-                        }`}
-                      />
-                    </button>
+                ) : round.phase === "pick" ? (
+                  <NextPainterCard
+                    painter={painter}
+                    title={copy.nextTurn}
+                    label={copy.nextPainterLabel}
+                    lastWord={
+                      lastWord
+                        ? copy.previousWord.replace("{word}", lastWord)
+                        : undefined
+                    }
+                  />
+                ) : round.phase === "warn" && isPainter ? (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.94 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="m-auto px-6 text-center"
+                  >
+                    <p className="font-display text-2xl leading-snug text-ink">{copy.warnTitle}</p>
+                  </motion.div>
+                ) : round.phase === "reveal" ? (
+                  <IntermissionStage
+                    skipped={skippedTurn}
+                    nobodyGuessed={nobodyGuessed}
+                    painterName={painter?.nickname ?? ""}
+                    word={round.word ?? ""}
+                    guessedCount={round.correctIds.length}
+                    copy={copy}
+                  />
+                ) : (
+                  <div className="absolute inset-0">
+                    <DrawCanvas
+                      strokes={strokes}
+                      color={color}
+                      width={brushWidth}
+                      interactive={isPainter && round.phase === "draw"}
+                      onStroke={onStroke}
+                    />
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={undoBoard}
-                      aria-label={copy.undo}
-                      className="flex size-8 items-center justify-center rounded-full bg-background"
-                    >
-                      <Undo2 className="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={clearBoard}
-                      aria-label={copy.clear}
-                      className="flex size-8 items-center justify-center rounded-full bg-background"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-              <section className="mt-2 flex h-full min-h-0 flex-col overflow-hidden">
-                <p className="shrink-0 text-[10px] font-medium uppercase tracking-[0.14em] text-muted">
-                  {copy.chatTitle}
-                </p>
-                <ul
-                  ref={chatListRef}
-                  className="min-h-0 flex-1 space-y-1 overflow-y-auto rounded-xl bg-surface/50 p-2"
-                >
-                  {chat.map((message) => {
-                    const isMuted = muted.includes(message.clientId);
-                    return (
-                      <li
-                        key={message.id}
-                        className={`flex items-start justify-between gap-2 rounded-xl px-2 py-1.5 text-xs ${
-                          !isMuted && message.kind === "correct"
-                            ? "bg-emerald-500/15 text-emerald-800"
-                            : "bg-surface text-ink"
+                )}
+                {isPainter && round.phase === "draw" ? (
+                  <div className="absolute inset-x-2 bottom-2 z-10 flex items-center justify-between gap-2 rounded-xl bg-background/90 px-3 py-1.5 shadow-sm">
+                    <div className="flex items-center gap-1.5">
+                      {drawConfig.colors.map((swatch) => (
+                        <button
+                          key={swatch.id}
+                          type="button"
+                          aria-label={swatch.id}
+                          onClick={() => setColor(swatch.hex)}
+                          className={`size-6 rounded-full border-2 ${
+                            color === swatch.hex ? "border-ink" : "border-transparent"
+                          }`}
+                          style={{ background: swatch.hex }}
+                        />
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setBrush("thin")}
+                        aria-label={copy.thinBrush}
+                        className={`flex size-7 items-center justify-center rounded-full ${
+                          brush === "thin" ? "bg-primary" : "bg-surface"
                         }`}
                       >
-                        <span className={isMuted ? "italic text-muted" : undefined}>
-                          {isMuted
-                            ? `${message.nickname}`
-                            : message.kind === "correct"
-                              ? copy.correctBanner.replace("{nickname}", message.nickname)
-                              : `${message.avatar} ${message.nickname}: ${message.text}`}
-                        </span>
-                        {message.clientId !== player.clientId ? (
-                          <button
-                            type="button"
-                            onClick={() => toggleMute(message.clientId)}
-                            aria-label={isMuted ? copy.unmute : copy.mute}
-                            className="shrink-0 text-muted"
-                          >
-                            {isMuted ? (
-                              <VolumeX className="size-3.5" />
-                            ) : (
-                              <Volume2 className="size-3.5" />
-                            )}
-                          </button>
-                        ) : null}
-                      </li>
-                    );
-                  })}
-                  <li ref={chatEndRef} aria-hidden className="h-px" />
-                </ul>
-                {isPainter ? (
-                  <p className="shrink-0 rounded-xl bg-surface px-3 py-2 text-center text-xs font-medium text-muted pb-safe">
-                    {copy.waitingGuesses}
-                  </p>
-                ) : alreadyCorrect ? (
-                  <p className="shrink-0 rounded-xl bg-emerald-500/15 px-3 py-2 text-center text-xs font-medium text-emerald-800 pb-safe">
-                    {copy.lockedGuess}
-                  </p>
-                ) : round.phase === "draw" ? (
-                  <form
-                    className="sticky bottom-0 flex shrink-0 gap-2 border-t border-primary/10 bg-background/95 p-2 backdrop-blur pb-safe"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      submitGuess();
-                    }}
-                  >
-                    <input
-                      value={guess}
-                      onChange={(event) => setGuess(event.target.value)}
-                      placeholder={copy.guessPlaceholder}
-                      className="field-input min-h-11 flex-1 text-sm"
-                    />
-                    <button
-                      type="submit"
-                      aria-label={copy.guessSend}
-                      className="btn-primary min-h-11 px-3"
-                    >
-                      <Send className="size-4" />
-                    </button>
-                  </form>
+                        <span
+                          className={`block size-1.5 rounded-full ${
+                            brush === "thin" ? "bg-on-primary" : "bg-ink"
+                          }`}
+                        />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBrush("thick")}
+                        aria-label={copy.thickBrush}
+                        className={`flex size-7 items-center justify-center rounded-full ${
+                          brush === "thick" ? "bg-primary" : "bg-surface"
+                        }`}
+                      >
+                        <span
+                          className={`block size-2.5 rounded-full ${
+                            brush === "thick" ? "bg-on-primary" : "bg-ink"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={undoBoard}
+                        aria-label={copy.undo}
+                        className="flex size-8 items-center justify-center rounded-full bg-surface"
+                      >
+                        <Undo2 className="size-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={clearBoard}
+                        aria-label={copy.clear}
+                        className="flex size-8 items-center justify-center rounded-full bg-surface"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </div>
+                  </div>
                 ) : null}
               </section>
-            </div>
-          ) : null}
+
+              {showChrome ? (
+                <div className="mt-1.5 flex min-h-[10.5rem] flex-1 gap-1.5 pb-safe">
+                  <aside className="w-[7.25rem] shrink-0 overflow-y-auto rounded-2xl bg-surface/80">
+                    {ranked.map((entry) => {
+                      const guessed = round.correctIds.includes(entry.clientId);
+                      const drawing = round.painterId === entry.clientId;
+                      return (
+                        <button
+                          key={entry.clientId}
+                          type="button"
+                          onClick={() => {
+                            if (entry.clientId === player.clientId) return;
+                            setVotePrompt(entry.clientId);
+                          }}
+                          className={`flex w-full items-center gap-1.5 border-b border-primary/10 px-1.5 py-1.5 text-left ${
+                            drawing ? "bg-primary/10" : ""
+                          }`}
+                        >
+                          <span className="relative text-lg leading-none">
+                            {entry.avatar}
+                            {guessed ? (
+                              <span className="absolute -bottom-0.5 -right-0.5 text-[9px] text-emerald-600">
+                                ✓
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[10px] font-medium text-ink">
+                              {entry.nickname}
+                            </span>
+                            <span className="block text-[9px] text-muted">
+                              {round.scores[entry.clientId] ?? 0}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </aside>
+                  <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-surface/80">
+                    <div className="flex shrink-0 items-center gap-1 px-2 pt-1.5">
+                      {!isPainter ? (
+                        <button
+                          type="button"
+                          onClick={() => setVotePrompt(round.painterId)}
+                          aria-label={copy.voteKick}
+                          className="flex size-8 items-center justify-center rounded-xl bg-primary/15 text-primary"
+                        >
+                          <AlertTriangle className="size-3.5" />
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => setLogsOpen(true)}
+                        aria-label={copy.openLogs}
+                        className="flex size-8 items-center justify-center rounded-xl bg-primary/15 text-primary"
+                      >
+                        <ScrollText className="size-3.5" />
+                      </button>
+                      <p className="min-w-0 flex-1 truncate text-[10px] font-bold uppercase tracking-[0.14em] text-muted">
+                        {copy.answersTab}
+                      </p>
+                    </div>
+                    <ul
+                      ref={chatListRef}
+                      className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 py-1"
+                    >
+                      {lastWord && round.phase !== "reveal" ? (
+                        <li className="text-[11px] font-medium text-primary">
+                          {copy.previousWord.replace("{word}", lastWord)}
+                        </li>
+                      ) : null}
+                      {painter && round.phase === "pick" ? (
+                        <li className="text-[11px] font-medium text-ink">
+                          {copy.turnOf.replace("{nickname}", painter.nickname)}
+                        </li>
+                      ) : null}
+                      {answers.map((message) => {
+                        const isMuted = muted.includes(message.clientId);
+                        return (
+                          <li
+                            key={message.id}
+                            className={`flex items-start justify-between gap-1 text-[11px] leading-snug ${
+                              message.kind === "correct"
+                                ? "font-medium text-emerald-700"
+                                : message.kind === "vote" || message.kind === "skip"
+                                  ? "font-medium text-red-700"
+                                  : "text-ink"
+                            }`}
+                          >
+                            <span className={isMuted ? "italic text-muted" : undefined}>
+                              {isMuted
+                                ? message.nickname
+                                : feedText(message, copy)}
+                            </span>
+                            {message.clientId !== player.clientId &&
+                            message.kind !== "vote" &&
+                            message.kind !== "skip" ? (
+                              <button
+                                type="button"
+                                onClick={() => toggleMute(message.clientId)}
+                                aria-label={isMuted ? copy.unmute : copy.mute}
+                                className="shrink-0 text-muted"
+                              >
+                                {isMuted ? (
+                                  <VolumeX className="size-3" />
+                                ) : (
+                                  <Volume2 className="size-3" />
+                                )}
+                              </button>
+                            ) : null}
+                          </li>
+                        );
+                      })}
+                      <li ref={chatEndRef} aria-hidden className="h-px" />
+                    </ul>
+                    {isPainter ? (
+                      <p className="shrink-0 px-2 py-2 text-center text-[11px] font-medium text-muted">
+                        {copy.waitingGuesses}
+                      </p>
+                    ) : alreadyCorrect ? (
+                      <p className="shrink-0 px-2 py-2 text-center text-[11px] font-medium text-emerald-700">
+                        {copy.lockedGuess}
+                      </p>
+                    ) : round.phase === "draw" ? (
+                      <form
+                        className="flex shrink-0 gap-1.5 border-t border-primary/10 p-1.5"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          submitGuess();
+                        }}
+                      >
+                        <input
+                          value={guess}
+                          onChange={(event) => setGuess(event.target.value)}
+                          placeholder={copy.guessPlaceholder}
+                          className="field-input min-h-10 flex-1 text-sm"
+                        />
+                        <button
+                          type="submit"
+                          aria-label={copy.guessSend}
+                          className="btn-primary min-h-10 px-3"
+                        >
+                          <Send className="size-4" />
+                        </button>
+                      </form>
+                    ) : (
+                      <p className="shrink-0 px-2 py-2 text-center text-[11px] font-medium text-muted">
+                        {round.phase === "reveal" ? copy.intermission : copy.drawingWait}
+                      </p>
+                    )}
+                  </section>
+                </div>
+              ) : null}
+            </>
+          )}
         </main>
+
+        {logsOpen ? (
+          <div className="absolute inset-0 z-20 flex flex-col bg-ink/80 px-4 pt-[max(3rem,env(safe-area-inset-top))] pb-safe">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="font-display text-xl text-background">{copy.logsTab}</p>
+              <button
+                type="button"
+                onClick={() => setLogsOpen(false)}
+                aria-label={copy.closeLogs}
+                className="flex size-9 items-center justify-center rounded-full bg-background/15 text-background"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+              {logs.length === 0 ? (
+                <li className="text-sm text-background/70">{copy.logsTab}</li>
+              ) : (
+                logs.map((message) => (
+                  <li
+                    key={message.id}
+                    className={`text-sm ${
+                      message.kind === "vote" || message.kind === "skip"
+                        ? "text-red-300"
+                        : "text-background"
+                    }`}
+                  >
+                    {feedText(message, copy)}
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+        ) : null}
 
         {votePrompt ? (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-ink/50 px-6">
@@ -1108,4 +1284,110 @@ function WaitPulse({ title, detail }: { title: string; detail?: string }) {
       ) : null}
     </div>
   );
+}
+
+function NextPainterCard({
+  painter,
+  title,
+  label,
+  lastWord,
+}: {
+  painter: { avatar: string; nickname: string } | null;
+  title: string;
+  label: string;
+  lastWord?: string;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="m-auto flex flex-col items-center px-4 text-center"
+    >
+      <p className="font-display text-2xl text-ink">{title}</p>
+      <p className="mt-4 text-5xl" aria-hidden>
+        {painter?.avatar ?? "☕"}
+      </p>
+      <p className="mt-3 text-xs font-medium uppercase tracking-[0.16em] text-muted">{label}</p>
+      <p className="font-display text-2xl text-ink">{painter?.nickname ?? ""}</p>
+      {lastWord ? (
+        <p className="mt-3 text-xs font-medium text-primary">{lastWord}</p>
+      ) : null}
+    </motion.div>
+  );
+}
+
+function IntermissionStage({
+  skipped,
+  nobodyGuessed,
+  painterName,
+  word,
+  guessedCount,
+  copy,
+}: {
+  skipped: boolean;
+  nobodyGuessed: boolean;
+  painterName: string;
+  word: string;
+  guessedCount: number;
+  copy: typeof tenantConfig.copy.duel.draw;
+}) {
+  const sad = skipped || nobodyGuessed;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="m-auto flex flex-col items-center px-4 text-center"
+    >
+      <p className="font-display text-2xl text-ink">
+        {skipped ? copy.skippedTitle : copy.intermission}
+      </p>
+      <span
+        className={`${sad ? "draw-sad-icon" : "draw-wait-icon"} mt-3 text-5xl`}
+        aria-hidden
+      >
+        {sad ? "😢☕" : "☕"}
+      </span>
+      <p className="mt-3 text-sm font-medium text-muted">
+        {skipped
+          ? copy.skippedLead.replace("{nickname}", painterName)
+          : copy.restLead}
+      </p>
+      <p className="mt-2 font-display text-2xl text-ink">
+        {copy.wordReveal.replace("{word}", word)}
+      </p>
+      {!skipped ? (
+        <p className="mt-1 text-xs font-medium text-muted">
+          {nobodyGuessed
+            ? copy.nobodyGuessed
+            : copy.guessedCount.replace("{count}", String(guessedCount))}
+        </p>
+      ) : null}
+    </motion.div>
+  );
+}
+
+function feedText(
+  message: DrawChatMessage,
+  copy: typeof tenantConfig.copy.duel.draw,
+) {
+  if (message.kind === "correct") {
+    return copy.correctBanner.replace("{nickname}", message.nickname);
+  }
+  if (message.kind === "vote") {
+    return copy.logVote
+      .replace("{from}", message.nickname)
+      .replace("{target}", message.targetName ?? "");
+  }
+  if (message.kind === "skip") {
+    return copy.logSkip.replace("{nickname}", message.nickname);
+  }
+  if (message.kind === "join") {
+    return copy.logJoined.replace("{nickname}", message.nickname);
+  }
+  if (message.kind === "leave") {
+    return message.text === "kicked"
+      ? copy.logKicked.replace("{nickname}", message.nickname)
+      : copy.logLeft.replace("{nickname}", message.nickname);
+  }
+  return `${message.avatar} ${message.nickname}: ${message.text ?? ""}`;
 }

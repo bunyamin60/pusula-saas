@@ -27,7 +27,14 @@ export type DrawStroke = {
   points: DrawPoint[];
 };
 
-export type DrawChatKind = "wrong" | "correct" | "system";
+export type DrawChatKind =
+  | "wrong"
+  | "correct"
+  | "system"
+  | "vote"
+  | "join"
+  | "leave"
+  | "skip";
 
 export type DrawChatMessage = {
   id: string;
@@ -36,6 +43,8 @@ export type DrawChatMessage = {
   nickname: string;
   avatar: string;
   text?: string;
+  targetId?: string;
+  targetName?: string;
 };
 
 export type DrawScores = Record<string, number>;

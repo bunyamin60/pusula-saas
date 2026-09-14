@@ -670,10 +670,30 @@ body {
   }
 }
 
+@keyframes draw-sad-drip {
+  0%,
+  100% {
+    transform: rotate(-8deg) translateY(0);
+  }
+  40% {
+    transform: rotate(6deg) translateY(10px);
+  }
+  55% {
+    transform: rotate(4deg) translateY(8px);
+  }
+}
+
 .draw-wait-icon {
   display: inline-block;
   transform-origin: 50% 85%;
   animation: draw-wait-sway 1.15s ease-in-out infinite;
+}
+
+.draw-sad-icon {
+  display: inline-block;
+  transform-origin: 50% 20%;
+  animation: draw-sad-drip 1.6s ease-in-out infinite;
+  filter: grayscale(0.35);
 }
 
 .pb-safe {
