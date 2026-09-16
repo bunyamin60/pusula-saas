@@ -14,7 +14,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Swords } from "lucide-react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { DrawRoom } from "@/components/DrawRoom";
-import { GameContainer } from "@/components/GameContainer";
+import { DuelMatchContainer } from "@/components/DuelMatchContainer";
 import { tenantConfig, type DuelGameId } from "@/config/tenant.config";
 import {
   CHALLENGE_TIMEOUT_MS,
@@ -70,6 +70,9 @@ type DuelContextValue = {
   sendChallenge: (target: DuelPlayer) => void;
   inMatch: boolean;
   inDrawRoom: boolean;
+  match: DuelMatch | null;
+  drawRoomId: string | null;
+  exitMatch: () => void;
   joinDrawRoom: (roomId: string) => void;
   leaveDrawRoom: () => void;
 };
@@ -82,6 +85,31 @@ export function useDuel(): DuelContextValue {
     throw new Error("useDuel must be used within a DuelProvider");
   }
   return ctx;
+}
+
+export function DuelStage() {
+  const { tenantId, player, match, drawRoomId, exitMatch, leaveDrawRoom } =
+    useDuel();
+  return (
+    <>
+      {match ? (
+        <DuelMatchContainer
+          tenantId={tenantId}
+          match={match}
+          player={player}
+          onExit={exitMatch}
+        />
+      ) : null}
+      {drawRoomId ? (
+        <DrawRoom
+          roomId={drawRoomId}
+          tenantId={tenantId}
+          player={player}
+          onExit={leaveDrawRoom}
+        />
+      ) : null}
+    </>
+  );
 }
 
 export function DuelProvider({
@@ -539,6 +567,9 @@ export function DuelProvider({
       sendChallenge,
       inMatch: match != null,
       inDrawRoom: drawRoomId != null,
+      match,
+      drawRoomId,
+      exitMatch,
       joinDrawRoom,
       leaveDrawRoom,
     }),
@@ -551,6 +582,7 @@ export function DuelProvider({
       identity,
       joinDrawRoom,
       leaveDrawRoom,
+      exitMatch,
       match,
       peers,
       player,
@@ -584,22 +616,6 @@ export function DuelProvider({
       <AnimatePresence>
         {outgoingNotice ? <NoticeToast message={outgoingNotice} /> : null}
       </AnimatePresence>
-      {match ? (
-        <GameContainer
-          tenantId={tenantId}
-          match={match}
-          player={player}
-          onExit={exitMatch}
-        />
-      ) : null}
-      {drawRoomId ? (
-        <DrawRoom
-          roomId={drawRoomId}
-          tenantId={tenantId}
-          player={player}
-          onExit={leaveDrawRoom}
-        />
-      ) : null}
     </DuelContext.Provider>
   );
 }

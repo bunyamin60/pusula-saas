@@ -20,7 +20,7 @@ export function TalkPick({ onHome, onChoose }: TalkPickProps) {
       <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-primary">
         {copy.eyebrow}
       </p>
-      <h2 className="mt-2 font-display text-[1.85rem] leading-tight text-ink">
+      <h2 className="mt-2 font-sans text-[1.85rem] font-extrabold leading-tight tracking-tight text-[#272343]">
         {copy.pickTitle}
       </h2>
       <p className="mt-2 text-sm leading-relaxed text-muted">{copy.pickLead}</p>
@@ -49,13 +49,13 @@ function MoodCard({
     <button
       type="button"
       onClick={onChoose}
-      className="flex min-h-[5.75rem] items-center gap-4 rounded-2xl bg-surface px-4 py-4 text-left shadow-sm transition-transform active:scale-[0.99]"
+      className="flex min-h-[5.75rem] items-center gap-4 rounded-2xl border border-[#272343]/15 bg-[#e3f6f5] px-4 py-4 text-left shadow-sm transition-transform active:scale-[0.99]"
     >
-      <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-background text-2xl">
+      <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-[#bae8e8] text-2xl">
         {category.icon}
       </span>
       <span className="min-w-0">
-        <span className="block font-display text-xl leading-tight text-ink">
+        <span className="block font-sans text-xl font-extrabold leading-tight tracking-tight text-[#272343]">
           {category.title}
         </span>
         <span className="mt-1 block text-sm leading-snug text-muted">

@@ -1,204 +1,207 @@
 "use client";
 
-import { useState } from "react";
-import { AnimatePresence } from "framer-motion";
-import { BrandWordmark } from "@/components/BrandWordmark";
-import { SocialLinks } from "@/components/SocialLinks";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { ArcadeGameCard } from "@/components/ArcadeGameCard";
+import { CustomerAuthModal } from "@/components/CustomerAuthModal";
+import { DailyQuestionFeed } from "@/components/DailyQuestionFeed";
 import { DeviceTestReset } from "@/components/DeviceTestReset";
-import { DuelLobbyDrawer } from "@/components/DuelLobby";
 import { useDuel } from "@/components/DuelProvider";
 import { tenantConfig } from "@/config/tenant.config";
+import { arcadeGameCopy, featuredArcadeGames } from "@/lib/gameCatalog";
 import {
-  compassTitleOf,
-  isLoungeVenue,
-  resolveLandingCopy,
-} from "@/lib/landingCopy";
+  readCustomerProfile,
+  type CustomerProfile,
+} from "@/lib/customerProfile";
+import { resolveLogoUrl } from "@/lib/tenant";
 import { useCampaign } from "@/lib/useCampaign";
 
-type LandingProps = {
-  onStartCompass: () => void;
-  onStartTalk: () => void;
-  onOpenReward?: () => void;
-};
+type LobbyTab = "games" | "events" | "surveys";
 
-export function Landing({ onStartCompass, onStartTalk, onOpenReward }: LandingProps) {
-  const defaults = tenantConfig.copy.landing;
-  const duelCopy = tenantConfig.copy.duel;
+export function Landing() {
+  const copy = tenantConfig.copy.landing;
   const campaign = useCampaign();
-  const lounge = isLoungeVenue({ category: campaign.category });
-  const compassTitle = compassTitleOf(campaign.category);
-  const { kicker, greeting, accent, subhead } = resolveLandingCopy(campaign);
-  const { ready: duelReady, inMatch, inDrawRoom } = useDuel();
-  const [isDuelOpen, setIsDuelOpen] = useState(false);
-  const [wasBusy, setWasBusy] = useState(inMatch || inDrawRoom);
-  const busy = inMatch || inDrawRoom;
+  const router = useRouter();
+  const { tenantId, player, chooseIdentity } = useDuel();
+  const [tab, setTab] = useState<LobbyTab>("games");
+  const [authOpen, setAuthOpen] = useState(false);
+  const [profile, setProfile] = useState<CustomerProfile | null>(null);
 
-  if (busy !== wasBusy) {
-    setWasBusy(busy);
-    if (busy) setIsDuelOpen(false);
-  }
+  useEffect(() => {
+    setProfile(readCustomerProfile());
+  }, []);
+
+  const brand = (campaign.brandName || tenantConfig.brand.name).trim();
+  const logoUrl =
+    resolveLogoUrl(campaign.logoUrl, tenantId) || tenantConfig.brand.logoUrl;
+  const google =
+    campaign.googleReviewUrl || tenantConfig.reward.googleReviewUrl;
+  const instagram =
+    campaign.instagramUrl || tenantConfig.reward.instagramUrl;
+  const visible = featuredArcadeGames(campaign.enabledGames);
+  const tabs: Array<[LobbyTab, string]> = [
+    ["games", copy.tabs.games],
+    ["events", copy.tabs.events],
+    ["surveys", copy.tabs.surveys],
+  ];
 
   return (
-    <section className="flex flex-1 flex-col">
-      <p className="landing-badge">
-        <span className="landing-badge-dot" aria-hidden />
-        {kicker}
-      </p>
-
-      <div className="relative mt-6 flex flex-1 flex-col items-center">
-        <div className="pointer-events-none absolute left-1/2 top-2 h-40 w-40 -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
-        <div className="steam" aria-hidden>
-          <span />
-          <span />
-          <span />
+    <section className="flex flex-col pb-2">
+      {!profile ? (
+        <div className="flex items-center gap-2 rounded-2xl border border-ink/15 bg-surface px-3 py-2.5">
+          <p className="min-w-0 flex-1 font-sans text-[12px] font-medium leading-snug text-muted">
+            {copy.loginBanner}
+          </p>
+          <button
+            type="button"
+            onClick={() => setAuthOpen(true)}
+            className="shrink-0 rounded-2xl bg-primary px-3 py-1.5 font-sans text-[11px] font-bold text-on-primary shadow-sm transition hover:brightness-95 active:scale-95"
+          >
+            {copy.loginCta}
+          </button>
         </div>
-        <BrandWordmark />
+      ) : null}
+
+      <header className={`text-center ${profile ? "mt-1" : "mt-3"}`}>
+        <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-slate-100 bg-white p-1.5 shadow-sm">
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt={brand}
+              className="h-full w-full object-contain"
+            />
+          ) : (
+            <span className="font-sans text-[10px] font-black uppercase tracking-wide text-[var(--text-headline)]">
+              {brand.slice(0, 2)}
+            </span>
+          )}
+        </div>
+        <h1 className="font-sans text-xl font-black tracking-tight text-[var(--text-headline)]">
+          {brand}
+        </h1>
+        <p className="mt-0.5 text-[11px] font-bold uppercase tracking-widest text-[var(--text-body)]/70">
+          {copy.hallName}
+        </p>
+        {profile ? (
+          <span className="mt-1.5 inline-flex rounded-full border border-[var(--text-headline)]/15 bg-[var(--card-surface)] px-2.5 py-1 font-sans text-[11px] font-semibold text-[var(--text-headline)]">
+            {copy.welcomeBadge.replace("{name}", profile.name)}
+          </span>
+        ) : null}
+      </header>
+      {google || instagram ? (
+        <div className="mt-2 flex items-center justify-center gap-2">
+          {google ? (
+            <a
+              href={google}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 border border-[var(--text-headline)]/20 text-[var(--text-headline)] hover:bg-[var(--card-surface)] text-xs font-semibold px-3.5 py-1.5 rounded-full transition"
+            >
+              <GoogleMark />
+              {copy.googleReviewChip}
+            </a>
+          ) : null}
+          {instagram ? (
+            <a
+              href={instagram}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 border border-[var(--text-headline)]/20 text-[var(--text-headline)] hover:bg-[var(--card-surface)] text-xs font-semibold px-3.5 py-1.5 rounded-full transition"
+            >
+              <InstagramMark />
+              {copy.instagramChip}
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="mt-3 rounded-full border border-ink/15 bg-surface p-1">
+        <div className="grid grid-cols-3 gap-1">
+          {tabs.map(([id, label]) => {
+            const active = tab === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setTab(id)}
+                className={`rounded-full px-2 py-2 font-sans text-[12px] tracking-wide transition-colors ${
+                  active
+                    ? "bg-[var(--tab-active-bg)] font-extrabold text-[var(--tab-active-text)] shadow-sm"
+                    : "font-medium text-[var(--text-body)]"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      <div className="mt-auto space-y-5 pb-2 pt-6">
-        <div className="space-y-3 text-center">
-          <h1 className="landing-headline-block font-display text-[1.85rem] leading-tight text-ink">
-            <AccentTitle text={greeting} accent={accent} />
-          </h1>
-          <p className="landing-subhead text-[15px] leading-relaxed text-muted">
-            {subhead}
-          </p>
+      {tab === "games" ? (
+        <div className="-mx-5 mt-1 grid grid-cols-2 gap-3 px-4 pb-3 pt-2">
+          {visible.map((game) => {
+            const { title, badge } = arcadeGameCopy(game.id);
+            return (
+              <ArcadeGameCard
+                key={game.id}
+                game={game}
+                title={title}
+                badge={badge}
+                onClick={() => router.push(`/${tenantId}${game.path}`)}
+              />
+            );
+          })}
         </div>
-
-        {onOpenReward ? (
-          <button
-            type="button"
-            onClick={onOpenReward}
-            className="btn-secondary w-full"
-          >
-            {defaults.openReward}
-          </button>
-        ) : null}
-
-        <p className="text-center text-[11px] font-semibold uppercase tracking-[0.22em] text-primary">
-          {defaults.chooseLead}
+      ) : tab === "events" ? (
+        <DailyQuestionFeed tenantId={tenantId} clientId={player.clientId} />
+      ) : (
+        <p className="mt-8 text-center font-sans text-sm font-medium text-muted">
+          {copy.surveysEmpty}
         </p>
+      )}
 
-        <div className="space-y-3">
-          <button
-            type="button"
-            onClick={onStartCompass}
-            className="flex min-h-[5.75rem] w-full items-start gap-3 rounded-2xl bg-primary px-4 py-4 text-left text-on-primary shadow-lift transition-transform active:scale-[0.99]"
-          >
-            <span className="mt-0.5 flex shrink-0 items-center justify-center" aria-hidden>
-              {lounge ? (
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="h-7 w-7 flex-shrink-0 text-black"
-                >
-                  <path d="M10 2h4" />
-                  <path d="M11 2v2" />
-                  <path d="M13 2v2" />
-                  <path d="M8 5h8" />
-                  <path d="M12 5v6" />
-                  <path d="M9.5 11h5l2.2 7a2 2 0 0 1-1.9 2.5H9.2a2 2 0 0 1-1.9-2.5L9.5 11z" />
-                  <path d="M12 8c3.5 0 6 2 6 5.5v4" />
-                  <path d="M18 17.5v1.5" />
-                </svg>
-              ) : (
-                defaults.compassIcon
-              )}
-            </span>
-            <span className="min-w-0">
-              <span className="block font-display text-xl leading-tight">
-                {compassTitle}
-              </span>
-              <span className="mt-1 block text-sm leading-snug text-on-primary/80">
-                {campaign.hook || defaults.compassCaption}
-              </span>
-            </span>
-          </button>
-
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={onStartTalk}
-              className={`flex min-h-[6rem] flex-col items-start gap-1 rounded-2xl bg-surface px-3.5 py-3.5 text-left shadow-sm transition-transform active:scale-[0.99] ${
-                duelReady ? "" : "col-span-2"
-              }`}
-            >
-              <span className="text-2xl" aria-hidden>
-                {defaults.talkIcon}
-              </span>
-              <span className="font-display text-base leading-tight text-ink">
-                {defaults.talkTitle}
-              </span>
-              <span className="line-clamp-2 text-[11px] leading-snug text-muted">
-                {defaults.talkCaption}
-              </span>
-            </button>
-            {duelReady ? (
-              <button
-                type="button"
-                onClick={() => setIsDuelOpen(true)}
-                className="relative flex min-h-[6rem] flex-col items-start gap-1 rounded-2xl bg-surface px-3.5 py-3.5 text-left shadow-sm transition-transform active:scale-[0.99]"
-              >
-                <span className="absolute right-3 top-3 rounded-full bg-red-500 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-white">
-                  {duelCopy.liveBadge}
-                </span>
-                <span className="text-2xl" aria-hidden>
-                  {defaults.duelIcon}
-                </span>
-                <span className="font-display text-base leading-tight text-ink">
-                  {defaults.duelTitle}
-                </span>
-                <span className="line-clamp-2 text-[11px] leading-snug text-muted">
-                  {defaults.duelCaption}
-                </span>
-              </button>
-            ) : null}
-          </div>
-        </div>
-
-        <SocialLinks variant="landing" />
-
-        <p className="text-center text-xs tracking-wide text-muted">
-          {defaults.footnote}
-        </p>
+      <div className="mt-2">
         <DeviceTestReset />
       </div>
 
-      <AnimatePresence>
-        {isDuelOpen ? (
-          <DuelLobbyDrawer onClose={() => setIsDuelOpen(false)} />
-        ) : null}
-      </AnimatePresence>
+      <CustomerAuthModal
+        open={authOpen}
+        onClose={() => setAuthOpen(false)}
+        onSaved={(next) => {
+          setProfile(next);
+          chooseIdentity({ nickname: next.name, avatar: player.avatar });
+        }}
+      />
     </section>
   );
 }
 
-function AccentTitle({ text, accent }: { text: string; accent: string }) {
-  const index = accent ? text.indexOf(accent) : -1;
-
-  if (index === -1) {
-    return (
-      <>
-        {text}
-        {accent ? (
-          <>
-            {" "}
-            <span className="text-primary">{accent}</span>
-          </>
-        ) : null}
-      </>
-    );
-  }
-
+function GoogleMark() {
   return (
-    <>
-      {text.slice(0, index)}
-      <span className="text-primary">{text.slice(index, index + accent.length)}</span>
-      {text.slice(index + accent.length)}
-    </>
+    <svg viewBox="0 0 24 24" className="size-3.5" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M21.35 11.1H12.2v2.9h5.27c-.23 1.24-1.4 3.64-5.27 3.64-3.18 0-5.77-2.63-5.77-5.87s2.59-5.87 5.77-5.87c1.81 0 3.03.77 3.72 1.43l2.02-1.95C16.7 3.9 14.66 3 12.2 3 7.36 3 3.5 6.92 3.5 11.77S7.36 20.54 12.2 20.54c5.05 0 8.38-3.55 8.38-8.54 0-.57-.06-1-.13-.9Z"
+      />
+    </svg>
   );
 }
+
+function InstagramMark() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-3.5" fill="none" aria-hidden>
+      <rect
+        x="3.25"
+        y="3.25"
+        width="17.5"
+        height="17.5"
+        rx="5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <circle cx="12" cy="12" r="3.6" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="17.15" cy="6.85" r="1" fill="currentColor" />
+    </svg>
+  );
+}
+

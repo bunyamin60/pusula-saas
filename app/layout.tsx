@@ -1,16 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import { Fraunces, Outfit } from "next/font/google";
+import { Plus_Jakarta_Sans } from "next/font/google";
 import { tenantConfig } from "@/config/tenant.config";
 import { buildThemeCss } from "@/lib/themeCss";
 import "./globals.css";
 
-const display = Fraunces({
-  subsets: ["latin", "latin-ext"],
-  variable: "--font-display",
-  display: "swap",
-});
-
-const sans = Outfit({
+const sans = Plus_Jakarta_Sans({
   subsets: ["latin", "latin-ext"],
   variable: "--font-sans",
   display: "swap",
@@ -34,7 +28,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: tenantConfig.theme.primary,
+  themeColor: tenantConfig.theme.background,
   viewportFit: "cover",
   interactiveWidget: "resizes-content",
 };
@@ -43,7 +37,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="tr"
-      className={`${display.variable} ${sans.variable} h-full antialiased`}
+      className={`${sans.variable} h-full antialiased`}
     >
       <head>
         <style dangerouslySetInnerHTML={{ __html: buildThemeCss() }} />

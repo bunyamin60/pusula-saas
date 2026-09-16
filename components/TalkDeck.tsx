@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ExperienceBack } from "@/components/ExperienceBack";
 import {
   tenantConfig,
+  type TalkCategoryId,
   type TalkFlagVote,
   type TalkPrompt,
 } from "@/config/tenant.config";
@@ -21,6 +21,8 @@ type TalkDeckProps = {
   onHome: () => void;
   onPickMood: () => void;
   onClaim: () => void;
+  onChooseCategory?: (categoryId: TalkCategoryId) => void;
+  showModes?: boolean;
 };
 
 type PlayItem =
@@ -36,9 +38,11 @@ export function TalkDeck({
   onIndex,
   onAnswer,
   onVote,
-  onHome,
+  onHome: _onHome,
   onPickMood,
   onClaim,
+  onChooseCategory,
+  showModes = false,
 }: TalkDeckProps) {
   const copy = tenantConfig.copy.talk;
   const campaign = useCampaign();
@@ -62,6 +66,7 @@ export function TalkDeck({
   const startY = useRef(0);
   const dragging = useRef(false);
   const stageRef = useRef<HTMLDivElement>(null);
+  const canSwipe = Boolean(item && item.type === "prompt" && !isWrite);
 
   useEffect(() => {
     if (index !== safeIndex) onIndex(safeIndex);
@@ -71,20 +76,19 @@ export function TalkDeck({
     const node = stageRef.current;
     if (!node) return;
 
-    const onMove = (event: TouchEvent) => {
-      if (!dragging.current || isWrite) return;
-      const touch = event.touches[0];
-      const dx = touch.clientX - startX.current;
-      const dy = touch.clientY - startY.current;
+    const onMove = (event: PointerEvent) => {
+      if (!dragging.current || !canSwipe) return;
+      const dx = event.clientX - startX.current;
+      const dy = event.clientY - startY.current;
       if (Math.abs(dx) > Math.abs(dy)) {
         event.preventDefault();
         setDragX(dx);
       }
     };
 
-    node.addEventListener("touchmove", onMove, { passive: false });
-    return () => node.removeEventListener("touchmove", onMove);
-  }, [isWrite]);
+    node.addEventListener("pointermove", onMove, { passive: false });
+    return () => node.removeEventListener("pointermove", onMove);
+  }, [canSwipe]);
 
   function go(next: number, dir?: "left" | "right") {
     if (leaving || next < 0 || next >= playlist.length) return;
@@ -93,7 +97,7 @@ export function TalkDeck({
       onIndex(next);
       setDragX(0);
       setLeaving(null);
-    }, 280);
+    }, 420);
   }
 
   function voteAndGo(vote: TalkFlagVote) {
@@ -104,7 +108,7 @@ export function TalkDeck({
 
   function finishDrag() {
     dragging.current = false;
-    if (isWrite || item?.type !== "prompt") {
+    if (!canSwipe || item?.type !== "prompt") {
       setDragX(0);
       return;
     }
@@ -114,65 +118,112 @@ export function TalkDeck({
       else setDragX(0);
       return;
     }
-    setDragX(0);
+    if (dragX <= -64) go(safeIndex + 1, "left");
+    else if (dragX >= 64) go(safeIndex - 1, "right");
+    else setDragX(0);
   }
 
   if (!category || !item) {
-    return (
-      <section className="flex flex-1 flex-col">
-        <ExperienceBack onBack={onHome} />
-      </section>
-    );
+    return <section className="flex flex-1 flex-col" />;
   }
 
   const progress = copy.progress
     .replace("{current}", String(safeIndex + 1))
     .replace("{total}", String(playlist.length));
-  const flagTint =
-    isFlag && !leaving
-      ? dragX < -20
-        ? tenantConfig.talk.flagRed
-        : dragX > 20
-          ? tenantConfig.talk.flagGreen
-          : ""
-      : "";
+  const redGlow = leaving === "left" ? 1 : Math.min(1, Math.max(0, (-dragX - 12) / 72));
+  const greenGlow = leaving === "right" ? 1 : Math.min(1, Math.max(0, (dragX - 12) / 72));
+  const tabLabels = copy.tabs as Record<string, string>;
 
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden overscroll-none">
-      <div className="flex shrink-0 items-center justify-between gap-3">
-        <ExperienceBack onBack={onHome} />
-        <p className="text-xs text-muted">{progress}</p>
+      <div className="flex shrink-0 items-center justify-end gap-3">
+        <p className="font-sans text-xs font-medium text-[#2d334a]">{progress}</p>
       </div>
-      <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-primary">
-        {category.title}
-      </p>
+      {showModes ? (
+        <div className="mt-3 grid grid-cols-3 gap-1.5">
+          {campaign.talkCategories.map((item) => {
+            const active = item.id === categoryId;
+            const label = tabLabels[item.id] ?? item.title;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onChooseCategory?.(item.id)}
+                className={`rounded-xl px-1.5 py-2 text-center font-sans text-[11px] leading-tight tracking-wide transition-colors select-none active:scale-95 ${
+                  active
+                    ? "bg-[#272343] font-bold text-white"
+                    : "bg-slate-100 font-semibold text-slate-600"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-1 font-sans text-[11px] font-semibold uppercase tracking-[0.22em] text-[#2d334a]">
+          {tabLabels[category.id] ?? category.title}
+        </p>
+      )}
 
       <div
         ref={stageRef}
-        className="talk-stage relative mt-4 min-h-0 flex-1"
-        onTouchStart={(event) => {
-          if (isWrite) return;
-          startX.current = event.touches[0].clientX;
-          startY.current = event.touches[0].clientY;
+        className="talk-stage relative mt-4 min-h-0 flex-1 pb-6"
+        onPointerDown={(event) => {
+          if (!canSwipe) return;
+          startX.current = event.clientX;
+          startY.current = event.clientY;
           dragging.current = true;
+          event.currentTarget.setPointerCapture(event.pointerId);
         }}
-        onTouchEnd={finishDrag}
-        onTouchCancel={finishDrag}
+        onPointerUp={finishDrag}
+        onPointerCancel={finishDrag}
       >
+        <div
+          aria-hidden
+          className="talk-card-peek talk-card-peek-2"
+        />
+        <div
+          aria-hidden
+          className="talk-card-peek talk-card-peek-1"
+        />
         <article
-          className={`talk-card ${leaving === "left" ? "talk-card-out-left" : ""} ${leaving === "right" ? "talk-card-out-right" : ""}`}
-          style={{
-            ...(leaving
+          key={item.type === "prompt" ? item.prompt.id : `${item.type}-${safeIndex}`}
+          className={`talk-card relative z-10 overflow-hidden ${leaving === "left" ? "talk-card-out-left" : ""} ${leaving === "right" ? "talk-card-out-right" : ""}`}
+          style={
+            leaving
               ? undefined
-              : { transform: `translateX(${dragX}px) rotate(${dragX / 48}deg)` }),
-            ...(flagTint
-              ? {
-                  boxShadow: `inset 0 0 0 3px ${flagTint}`,
-                  background: `color-mix(in srgb, ${flagTint} 16%, var(--surface))`,
-                }
-              : {}),
-          }}
+              : { transform: `translateX(${dragX}px) rotate(${dragX / 28}deg)` }
+          }
         >
+          {canSwipe ? (
+            <>
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0 z-10 bg-red-500/10 transition-opacity duration-150"
+                style={{ opacity: redGlow }}
+              />
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0 z-10 bg-emerald-500/10 transition-opacity duration-150"
+                style={{ opacity: greenGlow }}
+              />
+              <span
+                aria-hidden
+                className="pointer-events-none absolute top-3 left-3 z-20 rounded-lg bg-red-500 px-2 py-1 font-sans text-[10px] font-bold tracking-[0.14em] text-white shadow-sm"
+                style={{ opacity: redGlow }}
+              >
+                {copy.swipeRed}
+              </span>
+              <span
+                aria-hidden
+                className="pointer-events-none absolute top-3 right-3 z-20 rounded-lg bg-emerald-500 px-2 py-1 font-sans text-[10px] font-bold tracking-[0.14em] text-white shadow-sm"
+                style={{ opacity: greenGlow }}
+              >
+                {copy.swipePass}
+              </span>
+            </>
+          ) : null}
           {item.type === "prompt" && item.prompt.kind === "write" ? (
             <WriteFace
               prompt={item.prompt}
@@ -225,19 +276,17 @@ export function TalkDeck({
             type="button"
             onClick={() => voteAndGo("red")}
             disabled={Boolean(leaving)}
-            className="flex min-h-14 flex-1 items-center justify-center rounded-2xl text-sm font-bold text-white"
-            style={{ backgroundColor: tenantConfig.talk.flagRed }}
+            className="flex-1 rounded-2xl border border-rose-200 bg-rose-50 py-3.5 font-sans text-sm font-bold text-rose-700 transition active:scale-95 disabled:opacity-40"
           >
-            ← {copy.flagLeft}
+            {copy.flagLeft}
           </button>
           <button
             type="button"
             onClick={() => voteAndGo("green")}
             disabled={Boolean(leaving)}
-            className="flex min-h-14 flex-1 items-center justify-center rounded-2xl text-sm font-bold text-white"
-            style={{ backgroundColor: tenantConfig.talk.flagGreen }}
+            className="flex-1 rounded-2xl border border-emerald-200 bg-emerald-50 py-3.5 font-sans text-sm font-bold text-emerald-800 transition active:scale-95 disabled:opacity-40"
           >
-            {copy.flagRight} →
+            {copy.flagRight}
           </button>
         </div>
       ) : null}
@@ -265,18 +314,18 @@ function WriteFace({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
-      <p className="font-display text-[1.45rem] leading-snug text-ink">
+      <p className="font-sans text-[1.45rem] font-extrabold leading-snug tracking-tight text-[#272343]">
         {prompt.text}
       </p>
-      <p className="mt-2 text-xs leading-relaxed text-muted">{copy.writeHint}</p>
+      <p className="mt-2 font-sans text-xs font-medium leading-relaxed text-[#2d334a]">{copy.writeHint}</p>
       {locked ? (
-        <div className="mt-4 rounded-2xl bg-background px-4 py-3">
-          <p className="text-sm leading-relaxed text-ink">{value}</p>
-          <p className="mt-2 text-xs text-primary">{copy.writeSaved}</p>
+        <div className="mt-4 rounded-2xl border border-[#272343]/15 bg-[#bae8e8] px-4 py-3">
+          <p className="font-sans text-sm font-medium leading-relaxed text-[#272343]">{value}</p>
+          <p className="mt-2 font-sans text-xs font-medium text-[#2d334a]">{copy.writeSaved}</p>
           <button
             type="button"
             onClick={() => setLocked(false)}
-            className="mt-2 text-xs text-muted underline decoration-primary/30 underline-offset-4"
+            className="mt-2 rounded-full bg-[#fffffe] px-3 py-1 font-sans text-xs font-bold text-[#272343]"
           >
             {copy.writeEdit}
           </button>
@@ -315,11 +364,11 @@ function FlagFace({
 }) {
   const copy = tenantConfig.copy.talk;
   return (
-    <div className="flex h-full flex-col">
-      <p className="font-display text-[1.55rem] leading-snug text-ink">
+    <div className="relative z-[15] flex h-full flex-col pt-6">
+      <p className="font-sans text-[1.55rem] font-extrabold leading-snug tracking-tight text-[#272343]">
         {prompt.text}
       </p>
-      <p className="mt-3 text-xs leading-relaxed text-muted">{copy.flagHint}</p>
+      <p className="mt-3 font-sans text-xs font-medium leading-relaxed text-[#2d334a]">{copy.flagHint}</p>
       {vote ? (
         <p
           className="mt-auto text-center text-sm font-semibold"
@@ -333,7 +382,7 @@ function FlagFace({
           {vote === "red" ? copy.flagLeft : copy.flagRight}
         </p>
       ) : (
-        <p className="mt-auto text-center text-xs tracking-wide text-muted">
+        <p className="mt-auto text-center font-sans text-xs font-medium tracking-wide text-[#2d334a]">
           {copy.flagHint}
         </p>
       )}
@@ -351,13 +400,13 @@ function SurpriseFace({
   const copy = tenantConfig.copy.talk;
   return (
     <div className="flex h-full flex-col">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-primary">
+      <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.22em] text-[#2d334a]">
         {copy.surpriseEyebrow}
       </p>
-      <h3 className="mt-3 font-display text-[1.65rem] leading-tight text-ink">
+      <h3 className="mt-3 font-sans text-[1.65rem] font-extrabold leading-tight tracking-tight text-[#272343]">
         {copy.surpriseTitle}
       </h3>
-      <p className="mt-3 text-[15px] leading-relaxed text-muted">{copy.surpriseBody}</p>
+      <p className="mt-3 font-sans text-[15px] font-medium leading-relaxed text-[#2d334a]">{copy.surpriseBody}</p>
       <div className="mt-auto space-y-2 pt-8">
         <button type="button" onClick={onClaim} className="btn-primary min-h-14 w-full">
           {copy.surpriseCta}
@@ -389,20 +438,20 @@ function EndFace({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
-      <h3 className="font-display text-[1.55rem] leading-tight text-ink">
+      <h3 className="font-sans text-[1.55rem] font-extrabold leading-tight tracking-tight text-[#272343]">
         {copy.compareTitle}
       </h3>
-      <p className="mt-2 text-sm leading-relaxed text-muted">{copy.compareLead}</p>
+      <p className="mt-2 font-sans text-sm font-medium leading-relaxed text-[#2d334a]">{copy.compareLead}</p>
 
       {writes.length ? (
         <div className="mt-4 space-y-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-primary">
+          <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.16em] text-[#2d334a]">
             {copy.compareWrites}
           </p>
           {writes.map((prompt) => (
-            <div key={prompt.id} className="rounded-2xl bg-background px-3 py-3">
-              <p className="text-xs text-muted">{prompt.text}</p>
-              <p className="mt-1 text-sm text-ink">
+            <div key={prompt.id} className="rounded-2xl border border-[#272343]/15 bg-[#bae8e8] px-3 py-3">
+              <p className="font-sans text-xs font-medium text-[#2d334a]">{prompt.text}</p>
+              <p className="mt-1 font-sans text-sm font-medium text-[#272343]">
                 {answers[prompt.id]?.trim() || copy.emptyAnswer}
               </p>
             </div>
@@ -412,14 +461,14 @@ function EndFace({
 
       {flags.length ? (
         <div className="mt-4 space-y-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-primary">
+          <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.16em] text-[#2d334a]">
             {copy.compareFlags}
           </p>
           {flags.map((prompt) => {
             const vote = votes[prompt.id];
             return (
-              <div key={prompt.id} className="flex items-start justify-between gap-3 rounded-2xl bg-background px-3 py-3">
-                <p className="text-sm text-ink">{prompt.text}</p>
+              <div key={prompt.id} className="flex items-start justify-between gap-3 rounded-2xl border border-[#272343]/15 bg-[#bae8e8] px-3 py-3">
+                <p className="font-sans text-sm font-medium text-[#272343]">{prompt.text}</p>
                 <span
                   className="shrink-0 text-xs font-bold"
                   style={{
@@ -443,7 +492,7 @@ function EndFace({
         </div>
       ) : null}
 
-      <p className="mt-4 text-sm text-muted">{copy.endBody}</p>
+      <p className="mt-4 font-sans text-sm font-medium text-[#2d334a]">{copy.endBody}</p>
       <div className="mt-auto space-y-2 pt-6">
         <button type="button" onClick={onAgain} className="btn-primary min-h-14 w-full">
           {copy.again}

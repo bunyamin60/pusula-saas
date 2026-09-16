@@ -24,6 +24,7 @@ const OPTIONAL_COLUMNS = [
   "hero_subtitle",
   "admin_password",
   "enabled_games",
+  "active_games",
 ] as const;
 
 export async function GET(request: Request) {

@@ -4,6 +4,7 @@ import {
   type DuelGameId,
   type EnabledGames,
 } from "@/config/tenant.config";
+import { readCustomerProfile } from "@/lib/customerProfile";
 
 export type DuelPlayerStatus = "idle" | "in_game";
 
@@ -123,6 +124,8 @@ export function readOrCreateIdentity(): DuelIdentity {
             alias.nickname === stored.nickname && alias.avatar === stored.avatar,
         );
         if (allowed) return stored;
+        const customer = readCustomerProfile();
+        if (customer && stored.nickname === customer.name) return stored;
       }
     } catch {
       // ignore storage errors, fall through to a fresh identity

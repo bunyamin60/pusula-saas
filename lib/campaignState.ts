@@ -4,7 +4,6 @@ import {
   type CompassIcon,
   type CompassOption,
   type CompassQuestion,
-  type DuelGameId,
   type EnabledGames,
   type TalkCategory,
   type TalkPrompt,
@@ -78,6 +77,7 @@ export interface TenantSettingsRow {
   hero_title?: string | null;
   hero_subtitle?: string | null;
   enabled_games?: unknown;
+  active_games?: unknown;
 }
 
 const EXTRA_PRODUCT_ID = "__extra";
@@ -184,27 +184,69 @@ export function defaultTalkCategories(): TalkCategory[] {
   }));
 }
 
-const DUEL_GAME_IDS: DuelGameId[] = [
-  "trivia",
-  "emoji",
-  "swipe",
-  "number",
-  "quiz",
-];
-
 export function defaultEnabledGames(): EnabledGames {
   return { ...tenantConfig.duel.enabledGames };
 }
 
-function parseEnabledGames(raw: unknown, fallback = defaultEnabledGames()): EnabledGames {
+function storedBool(
+  stored: Partial<Record<string, unknown>>,
+  key: string,
+  fallback: boolean,
+): boolean {
+  return typeof stored[key] === "boolean" ? Boolean(stored[key]) : fallback;
+}
+
+export function parseEnabledGames(raw: unknown, fallback = defaultEnabledGames()): EnabledGames {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...fallback };
-  const stored = raw as Partial<Record<DuelGameId, unknown>>;
-  return Object.fromEntries(
-    DUEL_GAME_IDS.map((id) => [
-      id,
-      typeof stored[id] === "boolean" ? stored[id] : fallback[id],
-    ]),
-  ) as EnabledGames;
+  const stored = raw as Partial<Record<string, unknown>>;
+  const mapped =
+    "pop_trivia" in stored ||
+    "reflex" in stored ||
+    "icebreaker" in stored ||
+    "wheel" in stored;
+  const quiz = storedBool(
+    stored,
+    mapped ? "trivia" : "quiz",
+    fallback.quiz,
+  );
+  const trivia = storedBool(
+    stored,
+    mapped ? "pop_trivia" : "trivia",
+    fallback.trivia,
+  );
+  return {
+    trivia,
+    emoji: storedBool(stored, "emoji", fallback.emoji),
+    swipe: storedBool(stored, mapped ? "reflex" : "swipe", fallback.swipe !== false),
+    number: storedBool(stored, "number", fallback.number),
+    quiz,
+    draw: storedBool(stored, "draw", fallback.draw !== false),
+    talk: storedBool(stored, mapped ? "icebreaker" : "talk", fallback.talk !== false),
+    bill: storedBool(stored, mapped ? "wheel" : "bill", fallback.bill !== false),
+    pusulaFunnel: storedBool(stored, "pusula_funnel", fallback.pusulaFunnel !== false),
+  };
+}
+
+export function serializeActiveGames(games: EnabledGames): Record<string, boolean> {
+  return {
+    draw: games.draw !== false,
+    trivia: games.quiz !== false,
+    pop_trivia: games.trivia !== false,
+    emoji: games.emoji !== false,
+    reflex: games.swipe !== false,
+    icebreaker: games.talk !== false,
+    wheel: games.bill !== false,
+    pusula_funnel: games.pusulaFunnel !== false,
+    quiz: games.quiz !== false,
+    swipe: games.swipe !== false,
+    talk: games.talk !== false,
+    bill: games.bill !== false,
+    number: games.number !== false,
+  };
+}
+
+export function pusulaFunnelEnabled(games: EnabledGames): boolean {
+  return games.pusulaFunnel !== false;
 }
 
 export function talkPromptsOf(
@@ -323,13 +365,13 @@ export function defaultCampaign(tenantId: string = DEFAULT_TENANT_ID): CampaignS
     landingGreeting: "",
     landingAccent: "",
     landingSubhead: "",
-    heroTitle: "",
-    heroSubtitle: "",
+    heroTitle: tenantConfig.copy.landing.heroFallbackTitle,
+    heroSubtitle: tenantConfig.copy.landing.heroFallbackSubtitle,
     brandName: tenantConfig.brand.name,
     location: tenantConfig.brand.location,
     logoUrl: defaultLogoUrlForTenant(id) || tenantConfig.brand.logoUrl,
     category: "cafe",
-    themePreset: isLoungeTenantId(id) ? "lounge" : "terracotta",
+    themePreset: isLoungeTenantId(id) ? "lounge" : "sun-mint",
     themeConfig: {
       ...(isLoungeTenantId(id)
         ? themeConfigFromPreset("lounge")
@@ -561,8 +603,12 @@ function firstText(...values: unknown[]): string {
 function parseHeroCopy(
   raw: Partial<CampaignSettings> | Record<string, unknown>,
 ): Pick<CampaignSettings, "heroTitle" | "heroSubtitle" | "landingGreeting" | "landingSubhead"> {
-  const heroTitle = firstText(raw.heroTitle, raw.landingGreeting);
-  const heroSubtitle = firstText(raw.heroSubtitle, raw.landingSubhead);
+  const heroTitle =
+    firstText(raw.heroTitle, raw.landingGreeting) ||
+    tenantConfig.copy.landing.heroFallbackTitle;
+  const heroSubtitle =
+    firstText(raw.heroSubtitle, raw.landingSubhead) ||
+    tenantConfig.copy.landing.heroFallbackSubtitle;
   return {
     heroTitle,
     heroSubtitle,
@@ -862,9 +908,9 @@ export function campaignFromRow(row: TenantSettingsRow): CampaignSettings {
       : defaults.wheelPrizes,
     talkCategories: parseTalkCategories(row.conversation_cards),
     enabledGames: parseEnabledGames(
-      "enabled_games" in row && row.enabled_games != null
-        ? row.enabled_games
-        : extra.enabledGames,
+      row.active_games ??
+        row.enabled_games ??
+        extra.enabledGames,
       defaults.enabledGames,
     ),
     revision: row.updated_at,
@@ -900,7 +946,8 @@ export function campaignToRow(settings: CampaignSettings): Omit<TenantSettingsRo
     category: settings.category,
     hero_title: settings.heroTitle,
     hero_subtitle: settings.heroSubtitle,
-    enabled_games: settings.enabledGames,
+    active_games: serializeActiveGames(settings.enabledGames),
+    enabled_games: serializeActiveGames(settings.enabledGames),
     products: [
       ...settings.products.map((product) => {
         const tastingNotes = (product.tastingNotes ?? [])
@@ -1075,4 +1122,9 @@ export function isValidAdminPassword(password: string): boolean {
 
 export function isValidDuration(minutes: number): boolean {
   return Number.isInteger(minutes) && minutes >= 1 && minutes <= 120;
+}
+
+export function clampRewardDuration(minutes: number, fallback = 20): number {
+  if (!Number.isFinite(minutes)) return fallback;
+  return Math.min(45, Math.max(10, Math.round(minutes)));
 }

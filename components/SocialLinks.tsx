@@ -6,7 +6,7 @@ import { tenantConfig } from "@/config/tenant.config";
 import { useCampaign } from "@/lib/useCampaign";
 
 type SocialLinksProps = {
-  variant: "landing" | "reward" | "claimed";
+  variant: "landing" | "reward" | "claimed" | "pills";
 };
 
 export function SocialLinks({ variant }: SocialLinksProps) {
@@ -58,6 +58,35 @@ export function SocialLinks({ variant }: SocialLinksProps) {
   }
 
   if (!ready || (!instagram && !google)) return null;
+
+  if (variant === "pills") {
+    return (
+      <div className="flex justify-center gap-2">
+        {instagram ? (
+          <a
+            href={instagram}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-full border border-slate-800/80 bg-slate-900/80 px-4 text-xs font-semibold text-ink/60"
+          >
+            <InstagramIcon className="size-3.5" />
+            {landing.instagram}
+          </a>
+        ) : null}
+        {google ? (
+          <a
+            href={google}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-full border border-slate-800/80 bg-slate-900/80 px-4 text-xs font-semibold text-ink/60"
+          >
+            <Star className="size-3.5" />
+            {landing.google}
+          </a>
+        ) : null}
+      </div>
+    );
+  }
 
   if (variant === "landing") {
     return (

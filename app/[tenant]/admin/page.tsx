@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useParams } from "next/navigation";
+import { AdminDashboard } from "@/components/AdminDashboard";
 import { AdminLogin } from "@/components/AdminLogin";
-import { CampaignForm } from "@/components/CampaignForm";
 import {
   getServerAdminAuth,
   getAdminAuth,
@@ -12,9 +12,8 @@ import {
   setAdminAuth,
   subscribeToAdminAuth,
 } from "@/lib/adminAuth";
-import { getActiveTenantId, resetCampaign, saveCampaign } from "@/lib/campaignState";
+import { getActiveTenantId } from "@/lib/campaignState";
 import { DEFAULT_TENANT_ID } from "@/lib/tenant";
-import { useCampaign } from "@/lib/useCampaign";
 
 export default function TenantAdminPage() {
   const params = useParams<{ tenant?: string }>();
@@ -24,7 +23,6 @@ export default function TenantAdminPage() {
     getAdminAuth,
     getServerAdminAuth,
   );
-  const campaign = useCampaign();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -36,25 +34,16 @@ export default function TenantAdminPage() {
   const logout = useCallback(() => lockAdmin(tenantId), [tenantId]);
 
   if (!ready) {
-    return <main className="min-h-dvh bg-background" />;
+    return <main className="min-h-dvh bg-[var(--bg-canvas)]" />;
   }
 
   if (!authed) {
     return (
-      <main className="min-h-dvh bg-background">
+      <main className="min-h-dvh bg-[var(--bg-canvas)]">
         <AdminLogin onSuccess={login} />
       </main>
     );
   }
 
-  return (
-    <main className="min-h-dvh bg-background">
-      <CampaignForm
-        initial={campaign}
-        onSave={saveCampaign}
-        onReset={resetCampaign}
-        onLogout={logout}
-      />
-    </main>
-  );
+  return <AdminDashboard onLogout={logout} />;
 }

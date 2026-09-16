@@ -1,7 +1,6 @@
 "use client";
 
 import { useLayoutEffect, type ReactNode } from "react";
-import { usePathname } from "next/navigation";
 import { SeededCampaignContext } from "@/lib/useCampaign";
 import {
   bindTenant,
@@ -45,19 +44,17 @@ function TenantThemeSync({
   initial: CampaignSettings;
 }) {
   const campaign = useCampaign();
-  const pathname = usePathname();
 
   useLayoutEffect(() => {
     bindTenant(tenantId, initial);
   }, [tenantId, initial]);
 
   useLayoutEffect(() => {
-    if (pathname?.includes("/admin")) return;
     applyThemeTokens(tokensFromThemeConfig(campaign.themeConfig));
     document.title = campaign.location
       ? `${campaign.brandName} · ${campaign.location}`
       : campaign.brandName;
-  }, [campaign, pathname]);
+  }, [campaign]);
 
   return null;
 }

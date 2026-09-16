@@ -1,25 +1,38 @@
 # Arada & White-Label Coffee Gamification SaaS Rules
 
-You are an expert Senior Frontend & Full-Stack Engineer specializing in Next.js (App Router), TypeScript, Tailwind CSS, and mobile-first micro-experiences (PWA).
+You are an expert Senior Frontend & Full-Stack Engineer specializing in Next.js (App Router), TypeScript, Tailwind CSS, Supabase Realtime, and mobile-first micro-experiences (PWA).
 
-## Architectural Principles
-1. **White-Label First (Tenant Config):**
+## 1. Architectural Principles
+1. **White-Label & Tenant Architecture:**
    - Hardcoded strings, colors, logos, or menu items are strictly forbidden in UI components.
-   - All brand identity, copy, questions, logic trees, and reward settings must reside in `/config/tenant.config.ts`.
-   - Switching brands must only require editing this configuration file.
+   - Brand identity, copy, questions, logic trees, and reward settings must come from `/config/tenant.config.ts` or the active Supabase tenant context.
+   - Keep existing Supabase multi-tenant schema (`tenants`, `tables`, `reward_coupons`) and Realtime presence/broadcast channels intact. Do not replace them with arbitrary external libraries.
 
-2. **Mobile-First App Experience (PWA Style):**
+2. **Mobile-First App Experience (PWA Shell):**
    - The UI is designed for smartphones inside browser viewports (QR scan flow).
-   - Constrain the maximum width to `max-w-md` (centered on desktop) with a native mobile app feel (`min-h-screen`, touch-friendly targets, no accidental zoom).
+   - Constrain the maximum viewport width to `max-w-md mx-auto` (centered on desktop) with native mobile ergonomics (`min-h-screen`, `touch-manipulation`, minimum 48px tap targets).
 
-3. **State Management & Persistence:**
-   - Use React state for multi-step transitions (Landing -> Compass -> Game -> Reward).
-   - Persist active game states, generated codes, and timers in `localStorage` so refreshing the browser preserves the active reward screen and prevents replay exploitation.
+3. **Game Architecture & Container Pattern:**
+   - Standalone full-screen pages for games are forbidden. All games (`CafeQuiz`, `DrawRoom`, `BillWheel`, `TalkDeck`) must render inside the unified `GameContainer.tsx` shell.
+   - Maintain state transitions cleanly (Landing -> Modal/Lobby -> Game Loop -> Reward Modal).
+   - Persist timers, active game progress, and generated voucher codes in `localStorage` to prevent reload loss or replay exploitation.
 
-4. **Performance & Lightweight Animations:**
-   - Keep bundle size minimal. Use Tailwind animations or Framer Motion for smooth micro-interactions.
-   - The "Barista Pour" reflex game must run at 60 FPS using HTML5 Canvas or CSS transform-based requestAnimationFrame.
+## 2. Design System: Happy Hues Light Arcade
+Strictly follow this single visual identity across all components. Previous dark/navy or terracotta themes are deprecated.
 
-5. **Design Aesthetics (Artisan Boutique Vibe):**
-   - Clean, modern, warm editorial design reflecting specialty 3rd wave coffee culture (warm cream backgrounds, terracotta accents, espresso charcoal typography).
-   - Avoid generic corporate SaaS looks; prioritize boutique typography, tactile buttons, and subtle rounded corners (`rounded-2xl`).
+- **Typography:**
+  - Strictly FORBIDDEN: `font-serif`, `serif`, `Times`, `Georgia`, or any serif font.
+  - Mandatory Font: Modern sans-serif (`font-sans`, Plus Jakarta Sans).
+  - Headlines & Questions: `text-[#272343] font-extrabold tracking-tight`
+  - Paragraphs & Body: `text-[#2d334a] font-medium`
+
+- **Color Tokens:**
+  - Background (App & Screens): `#fffffe` (Clean, bright, light canvas)
+  - Primary CTA Buttons: `bg-[#ffd803] text-[#272343] font-bold rounded-2xl shadow-sm hover:brightness-95 active:scale-95 transition`
+  - Secondary Cards / Container Surfaces: `bg-[#e3f6f5]` or `bg-[#bae8e8]` with `border border-[#272343]/15`
+  - Neutral / Secondary Buttons: `bg-[#fffffe] text-[#272343] border-2 border-[#272343]/20 rounded-xl hover:bg-slate-50`
+  - Reward & Voucher Badges: `bg-[#ffd803] text-[#272343] font-black`
+
+- **Component & Asset Rules:**
+  - Naked unstyled hyperlinks (`<a>` with underline) are strictly forbidden. All actions must be styled as pills, chips, or elevated buttons.
+  - 3D Game Card Assets: Must be placed inside `relative overflow-hidden` containers positioned `absolute -right-2 -bottom-2` without any visible checkerboard/gray background clipping.

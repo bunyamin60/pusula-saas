@@ -1,5 +1,6 @@
 import {
   tenantConfig,
+  type GuestPaletteId,
   type LogoShape,
   type TenantCategory,
   type TenantThemeConfig,
@@ -9,7 +10,16 @@ import {
 
 export const DEFAULT_TENANT_ID: string = tenantConfig.id;
 
+export const GUEST_PALETTE_IDS: GuestPaletteId[] = [
+  "sun-mint",
+  "cream-pink",
+  "minimal-orange",
+  "modern-purple",
+  "neon-teal",
+];
+
 const PRESET_IDS: ThemePresetId[] = [
+  ...GUEST_PALETTE_IDS,
   "lounge",
   "cyberpunk",
   "velvet",
@@ -18,12 +28,13 @@ const PRESET_IDS: ThemePresetId[] = [
   "slate",
 ];
 const LOUNGE_PRESETS: ThemePresetId[] = ["lounge", "cyberpunk", "velvet", "slate"];
+const ACTIVE_THEME_KEY = "active_theme";
 const LOGO_SHAPES: LogoShape[] = ["circle", "square"];
 
-const INK_ON_DARK = "#F8FAFC";
-const MUTED_ON_DARK = "#D6D3D1";
-const INK_ON_LIGHT = "#1A1716";
-const MUTED_ON_LIGHT = "#7A726D";
+const INK_ON_DARK = "#fffffe";
+const MUTED_ON_DARK = "#bae8e8";
+const INK_ON_LIGHT = "#272343";
+const MUTED_ON_LIGHT = "#2d334a";
 
 export function sanitizeTenantId(raw: string | null | undefined): string | null {
   if (!raw) return null;
@@ -104,17 +115,17 @@ export function resolveLogoShape(
 }
 
 export function logoFrameClass(shape: LogoShape, size: "compact" | "hero" = "compact"): string {
-  if (shape === "circle") {
-    return size === "hero"
-      ? "flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-black/40"
-      : "flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-black/40";
+  if (size === "compact") {
+    return "flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-100 bg-white p-2 shadow-xs";
   }
-  return size === "hero"
-    ? "flex h-24 w-auto max-w-[220px] shrink-0 items-center justify-center rounded-2xl bg-white p-1.5 shadow-sm"
-    : "flex h-14 w-auto max-w-[140px] shrink-0 items-center justify-center rounded-2xl bg-white p-1.5 shadow-sm";
+  if (shape === "circle") {
+    return "flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#272343]/15 bg-[#e3f6f5] shadow-sm";
+  }
+  return "flex h-24 w-auto max-w-[220px] shrink-0 items-center justify-center rounded-2xl border border-[#272343]/15 bg-[#e3f6f5] p-1.5 shadow-sm";
 }
 
-export function logoImageClass(shape: LogoShape): string {
+export function logoImageClass(shape: LogoShape, size: "compact" | "hero" = "hero"): string {
+  if (size === "compact") return "h-full w-full object-contain";
   return shape === "circle"
     ? "h-full w-full object-cover"
     : "h-full w-auto max-h-full object-contain";
@@ -132,12 +143,12 @@ export function contrastOn(background: string): { ink: string; muted: string } {
 }
 
 export function defaultThemeConfig(): TenantThemeConfig {
-  const preset = tenantConfig.themePresets.terracotta;
-  return { preset: "terracotta", ...preset.config };
+  return themeConfigFromPreset("sun-mint");
 }
 
 export function themeConfigFromPreset(id: ThemePresetId): TenantThemeConfig {
-  const preset = tenantConfig.themePresets[id] ?? tenantConfig.themePresets.terracotta;
+  const preset =
+    tenantConfig.themePresets[id] ?? tenantConfig.themePresets["sun-mint"];
   return { preset: id, ...preset.config };
 }
 
@@ -161,27 +172,47 @@ export function parseThemeConfig(raw: unknown, fallback?: TenantThemeConfig): Te
   };
 }
 
+export function isGuestPaletteId(value: unknown): value is GuestPaletteId {
+  return typeof value === "string" && GUEST_PALETTE_IDS.includes(value as GuestPaletteId);
+}
+
+export function writeActiveThemeId(id: GuestPaletteId): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(ACTIVE_THEME_KEY, id);
+  } catch {
+    // Theme persistence is optional on locked browsers.
+  }
+}
+
+export function readActiveThemeId(): GuestPaletteId | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(ACTIVE_THEME_KEY);
+    return isGuestPaletteId(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveGuestPaletteId(
+  config?: TenantThemeConfig | null,
+): GuestPaletteId {
+  if (isGuestPaletteId(config?.preset)) return config.preset;
+  const stored = readActiveThemeId();
+  if (stored) return stored;
+  if (config?.preset === "terracotta" || config?.preset === "matcha") {
+    return "sun-mint";
+  }
+  return "sun-mint";
+}
+
 export function tokensFromThemeConfig(config?: TenantThemeConfig | null): ThemeTokens {
-  const safe = parseThemeConfig(config);
+  const parsed = parseThemeConfig(config);
+  const paletteId = resolveGuestPaletteId(parsed);
   const preset =
-    tenantConfig.themePresets[safe.preset] ?? tenantConfig.themePresets.terracotta;
-  const page = contrastOn(safe.bg || preset.tokens.background);
-  const card = contrastOn(safe.card_bg || preset.tokens.surface);
-  const onPrimary = isDarkHex(safe.primary || preset.tokens.primary)
-    ? "#FFF8F4"
-    : "#1A1716";
-  return {
-    ...preset.tokens,
-    primary: safe.primary || preset.tokens.primary,
-    primaryHover: safe.accent || preset.tokens.primaryHover,
-    background: safe.bg || preset.tokens.background,
-    surface: safe.card_bg || preset.tokens.surface,
-    textDark: page.ink,
-    textMuted: page.muted,
-    onSurface: card.ink,
-    onSurfaceMuted: card.muted,
-    onPrimary,
-  };
+    tenantConfig.themePresets[paletteId] ?? tenantConfig.themePresets["sun-mint"];
+  return { ...preset.tokens };
 }
 
 export function isDarkHex(hex: string): boolean {

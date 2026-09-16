@@ -15,9 +15,16 @@ import { useCampaign } from "@/lib/useCampaign";
 type BrandWordmarkProps = {
   compact?: boolean;
   home?: boolean;
+  centered?: boolean;
+  markOnly?: boolean;
 };
 
-export function BrandWordmark({ compact = false, home = false }: BrandWordmarkProps) {
+export function BrandWordmark({
+  compact = false,
+  home = false,
+  centered = false,
+  markOnly = false,
+}: BrandWordmarkProps) {
   const campaign = useCampaign();
   const params = useParams<{ tenant?: string }>();
   const tenantId = params.tenant ?? getActiveTenantId();
@@ -25,10 +32,16 @@ export function BrandWordmark({ compact = false, home = false }: BrandWordmarkPr
   const location = (campaign.location ?? "").trim();
   const logoUrl = resolveLogoUrl(campaign.logoUrl, tenantId);
   const shape = resolveLogoShape(campaign.themeConfig?.logo_shape, tenantId);
-  const frameClass = logoFrameClass(shape, compact ? "compact" : "hero");
+  const frameClass = compact
+    ? "flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-100 bg-white p-2 shadow-xs"
+    : logoFrameClass(shape, "hero");
 
   const image = logoUrl ? (
-    <img src={logoUrl} alt={name} className={logoImageClass(shape)} />
+    <img
+      src={logoUrl}
+      alt={name}
+      className={compact ? "h-full w-full object-contain" : logoImageClass(shape)}
+    />
   ) : name ? (
     <p
       className={`font-display font-semibold uppercase leading-none tracking-[0.18em] text-ink ${
@@ -61,14 +74,20 @@ export function BrandWordmark({ compact = false, home = false }: BrandWordmarkPr
       <div className={frameClass}>{image}</div>
     );
 
+    if (markOnly) return badge;
+
     return (
-      <div className="flex items-center justify-between gap-3 pb-5">
+      <div
+        className={`flex items-center gap-3 pb-3 ${
+          centered ? "justify-center" : "justify-between"
+        }`}
+      >
         {badge}
-        {location ? (
+        {centered || !location ? null : (
           <p className="min-w-0 truncate text-[11px] tracking-wide text-muted">
             {location}
           </p>
-        ) : null}
+        )}
       </div>
     );
   }

@@ -8,8 +8,10 @@ import {
   useState,
 } from "react";
 import { motion } from "framer-motion";
-import { AlertTriangle, ScrollText, Send, Trash2, Undo2, Volume2, VolumeX, X } from "lucide-react";
+import { AlertTriangle, Eraser, ScrollText, Send, Trash2, Undo2, Volume2, VolumeX, X } from "lucide-react";
 import { DrawCanvas } from "@/components/DrawCanvas";
+import { GameContainer } from "@/components/GameContainer";
+import { GameCountdown } from "@/components/GameCountdown";
 import { tenantConfig } from "@/config/tenant.config";
 import {
   DRAW_MAX_SNAPSHOT_STROKES,
@@ -78,6 +80,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
   const [guess, setGuess] = useState("");
   const [color, setColor] = useState<string>(drawConfig.colors[0].hex);
   const [brush, setBrush] = useState<"thin" | "thick">("thin");
+  const [eraser, setEraser] = useState(false);
   const [muted, setMuted] = useState<string[]>([]);
   const [votePrompt, setVotePrompt] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
@@ -87,6 +90,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
   const [socketEpoch, setSocketEpoch] = useState(0);
   const [logsOpen, setLogsOpen] = useState(false);
   const [lastWord, setLastWord] = useState<string | null>(null);
+  const [kickoff, setKickoff] = useState(false);
 
   const channelRef = useRef<ReturnType<NonNullable<typeof supabase>["channel"]> | null>(
     null,
@@ -98,6 +102,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
   const votesRef = useRef<Record<string, string[]>>({});
   const isHostRef = useRef(false);
   const hostApiRef = useRef<HostApi | null>(null);
+  const startRoundRef = useRef<() => void>(() => {});
   const onExitRef = useRef(onExit);
   const playerRef = useRef(player);
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -406,10 +411,6 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
         scores: {},
         round: 0,
       };
-      if (occupantsRef.current.length >= DRAW_MIN_PLAYERS) {
-        beginPick();
-        return;
-      }
       publishRound(emptyDrawRound());
     }
 
@@ -560,6 +561,12 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
     }
 
     hostApiRef.current = { chooseWord, applyGuess, applyVote };
+    startRoundRef.current = () => {
+      if (!isHostRef.current) return;
+      if (roundRef.current.phase !== "lobby") return;
+      if (occupantsRef.current.length < DRAW_MIN_PLAYERS) return;
+      beginPick();
+    };
 
     channel
       .on("presence", { event: "sync" }, () => {
@@ -611,8 +618,6 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
           !next.some((entry) => entry.clientId === roundRef.current.painterId);
         if (next.length < DRAW_MIN_PLAYERS && roundRef.current.phase !== "lobby") {
           beginPick();
-        } else if (roundRef.current.phase === "lobby" && next.length >= DRAW_MIN_PLAYERS) {
-          beginPick();
         } else if (painterGone && roundRef.current.phase !== "lobby") {
           clearHostTimer();
           beginPick();
@@ -629,6 +634,9 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
             },
           });
         }
+      })
+      .on("broadcast", { event: "lobby_countdown" }, () => {
+        setKickoff(true);
       })
       .on("broadcast", { event: "round_state" }, ({ payload }) => {
         const next = payload as DrawRoundState;
@@ -788,8 +796,12 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
     });
   }, [connected, player.avatar, player.clientId, player.nickname]);
 
-  const brushWidth =
-    brush === "thin" ? drawConfig.brushes.thin : drawConfig.brushes.thick;
+  const brushWidth = eraser
+    ? drawConfig.brushes.thick
+    : brush === "thin"
+      ? drawConfig.brushes.thin
+      : drawConfig.brushes.thick;
+  const strokeColor = eraser ? "#FFFFFF" : color;
   const painter =
     occupants.find((entry) => entry.clientId === round.painterId) ?? null;
   const isPainter = round.painterId === player.clientId;
@@ -825,6 +837,12 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
       return next;
     });
     send("canvas_undo", {});
+  }
+
+  function startGame() {
+    if (occupants.length < DRAW_MIN_PLAYERS || kickoff) return;
+    send("lobby_countdown", {});
+    setKickoff(true);
   }
 
   function submitGuess() {
@@ -911,93 +929,105 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
   }, [round.phase, round.word]);
 
   return (
-    <div
-      ref={shellRef}
-      className="fixed inset-x-0 top-0 z-[80] flex h-[100dvh] max-h-[100dvh] justify-center overflow-hidden bg-background"
+    <GameContainer
+      overlay
+      containerRef={shellRef}
+      title={copy.title}
+      onBack={() => setLeaveOpen(true)}
     >
-      <div className="relative flex h-full max-h-full w-full max-w-md select-none flex-col overflow-hidden bg-background">
-        <div className="shrink-0 pt-[max(0.35rem,env(safe-area-inset-top))]">
-          <header className="flex h-11 max-h-[55px] items-center gap-2 px-3">
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
-                {isCafe ? copy.publicRoomBadge : copy.roomCode.replace("{pin}", pin ?? "")}
-              </p>
-              <p className="truncate font-display text-sm leading-tight text-ink">
-                {copy.title}
-                {painter && round.phase !== "lobby"
-                  ? ` · ${painter.avatar} ${painter.nickname}`
-                  : ""}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setLeaveOpen(true)}
-              aria-label={copy.leave}
-              className="flex size-9 items-center justify-center rounded-full bg-surface text-ink"
-            >
-              <X className="size-4" />
-            </button>
-          </header>
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        {kickoff ? (
+          <GameCountdown
+            overlay
+            onDone={() => {
+              setKickoff(false);
+              startRoundRef.current();
+            }}
+          />
+        ) : null}
           {round.phase !== "lobby" ? (
-            <div className="mx-3 h-1 overflow-hidden rounded-full bg-surface">
+            <div className="mb-2 h-1 overflow-hidden rounded-full bg-surface">
               <div
                 className="h-full rounded-full bg-primary transition-[width] duration-100"
                 style={{ width: `${Math.min(100, (remaining / totalMs) * 100)}%` }}
               />
             </div>
           ) : null}
-        </div>
 
-        <main className="flex min-h-0 flex-1 flex-col px-2 pt-1.5">
+        <main className="flex min-h-0 flex-1 flex-col">
           {!connected ? (
             <WaitPulse title={supabase ? copy.connecting : copy.unavailable} />
           ) : round.phase === "lobby" ? (
-            <div className="m-auto w-full px-2 text-center">
+            <div className="m-auto w-full max-w-sm px-2 text-center">
               <span className="draw-wait-icon text-5xl" aria-hidden>
                 ☕
               </span>
               {!isCafe && pin ? (
                 <>
-                  <p className="mt-4 text-[10px] font-bold uppercase tracking-[0.18em] text-primary">
+                  <p className="mt-4 text-xs font-bold uppercase tracking-[0.18em] text-ink">
                     {copy.sharePin}
                   </p>
-                  <p className="mt-2 font-display text-5xl tracking-[0.22em] text-ink">
+                  <p className="mt-2 font-sans font-extrabold text-5xl tracking-[0.22em] text-ink">
                     {pin}
                   </p>
                 </>
               ) : (
-                <p className="mt-4 font-display text-2xl text-ink">{copy.publicRoomBadge}</p>
+                <p className="mt-4 font-sans font-extrabold text-2xl text-ink">{copy.publicRoomBadge}</p>
               )}
-              <p className="mt-4 text-sm font-medium tracking-wide text-muted">
+              <p className="mt-4 text-sm font-semibold tracking-wide text-ink">
                 {copy.waitingPlayers}
               </p>
-              <p className="mt-2 text-xs font-medium tracking-wide text-muted">
+              <p className="mt-2 text-sm font-semibold tracking-wide text-muted">
                 {copy.insideCount.replace("{count}", String(occupants.length))}
               </p>
-              <p className="mt-1 text-xs font-medium tracking-wide text-primary">
+              <div className="mt-3 flex flex-wrap justify-center gap-2">
+                {occupants.map((entry) => (
+                  <span
+                    key={entry.clientId}
+                    className="inline-flex items-center gap-1 rounded-full border border-[var(--card-border)] bg-[var(--card-surface)] px-2.5 py-1 font-sans text-xs font-semibold text-[var(--text-headline)]"
+                  >
+                    <span aria-hidden>{entry.avatar}</span>
+                    {entry.nickname}
+                  </span>
+                ))}
+              </div>
+              <p className="mt-3 text-sm font-semibold tracking-wide text-ink">
                 {copy.scoreGoal.replace("{score}", String(drawWinScore()))}
               </p>
+              <button
+                type="button"
+                onClick={startGame}
+                disabled={occupants.length < DRAW_MIN_PLAYERS}
+                className="btn-primary mt-5 w-full disabled:opacity-50"
+              >
+                {copy.startGame}
+              </button>
+              {occupants.length < DRAW_MIN_PLAYERS ? (
+                <p className="mt-2 text-xs font-medium text-muted">
+                  {copy.startNeed.replace("{count}", String(DRAW_MIN_PLAYERS))}
+                </p>
+              ) : null}
             </div>
           ) : (
             <>
               <section className="relative flex min-h-0 flex-[1.45] flex-col overflow-hidden rounded-2xl bg-white">
                 {isPainter && round.phase === "draw" ? (
-                  <p className="pointer-events-none absolute left-2 right-2 top-2 z-10 truncate rounded-xl bg-primary/90 px-3 py-1 text-center text-[11px] font-medium text-on-primary">
+                  <p className="pointer-events-none absolute left-2 right-2 top-2 z-10 truncate rounded-xl bg-primary px-3 py-1.5 text-center text-sm font-semibold text-on-primary">
                     {copy.secretWord.replace("{word}", round.word ?? "")}
                   </p>
                 ) : hint ? (
                   <div className="pointer-events-none absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-xl bg-ink px-3 py-1.5 text-center">
-                    <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-background/70">
+                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-background">
                       {copy.hintLabel}
                     </p>
-                    <p className="font-display text-lg tracking-[0.18em] text-background">
+                    <p className="font-sans font-extrabold text-lg tracking-[0.18em] text-background">
                       {hint}
                     </p>
                   </div>
                 ) : null}
                 {round.phase === "pick" && isPainter ? (
                   <div className="m-auto grid w-full max-w-sm gap-2 px-3">
-                    <p className="text-center font-display text-xl text-ink">{copy.pickTitle}</p>
+                    <p className="text-center font-sans font-extrabold text-xl text-ink">{copy.pickTitle}</p>
                     {round.options.map((word) => (
                       <button
                         key={word}
@@ -1029,7 +1059,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                     <p className="text-4xl leading-none" aria-hidden>
                       🚫
                     </p>
-                    <p className="mt-3 font-display text-xl font-semibold leading-snug text-on-primary">
+                    <p className="mt-3 font-sans font-extrabold text-xl font-semibold leading-snug text-on-primary">
                       {copy.warnTitle}
                     </p>
                   </motion.div>
@@ -1052,84 +1082,20 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                   <div className="absolute inset-0">
                     <DrawCanvas
                       strokes={strokes}
-                      color={color}
+                      color={strokeColor}
                       width={brushWidth}
                       interactive={isPainter && round.phase === "draw"}
                       onStroke={onStroke}
                     />
                   </div>
                 )}
-                {isPainter && round.phase === "draw" ? (
-                  <div className="absolute inset-x-2 bottom-2 z-10 flex items-center justify-between gap-2 rounded-xl bg-background/90 px-3 py-1.5 shadow-sm">
-                    <div className="flex items-center gap-1.5">
-                      {drawConfig.colors.map((swatch) => (
-                        <button
-                          key={swatch.id}
-                          type="button"
-                          aria-label={swatch.id}
-                          onClick={() => setColor(swatch.hex)}
-                          className={`size-6 rounded-full border-2 ${
-                            color === swatch.hex ? "border-ink" : "border-transparent"
-                          }`}
-                          style={{ background: swatch.hex }}
-                        />
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setBrush("thin")}
-                        aria-label={copy.thinBrush}
-                        className={`flex size-7 items-center justify-center rounded-full ${
-                          brush === "thin" ? "bg-primary" : "bg-surface"
-                        }`}
-                      >
-                        <span
-                          className={`block size-1.5 rounded-full ${
-                            brush === "thin" ? "bg-on-primary" : "bg-ink"
-                          }`}
-                        />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setBrush("thick")}
-                        aria-label={copy.thickBrush}
-                        className={`flex size-7 items-center justify-center rounded-full ${
-                          brush === "thick" ? "bg-primary" : "bg-surface"
-                        }`}
-                      >
-                        <span
-                          className={`block size-2.5 rounded-full ${
-                            brush === "thick" ? "bg-on-primary" : "bg-ink"
-                          }`}
-                        />
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={undoBoard}
-                        aria-label={copy.undo}
-                        className="flex size-8 items-center justify-center rounded-full bg-surface"
-                      >
-                        <Undo2 className="size-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={clearBoard}
-                        aria-label={copy.clear}
-                        className="flex size-8 items-center justify-center rounded-full bg-surface"
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
               </section>
 
               {showChrome ? (
-                <div className="mt-1.5 flex min-h-[10.5rem] flex-1 gap-1.5 pb-safe">
-                  <aside className="w-[7.25rem] shrink-0 overflow-y-auto rounded-2xl bg-surface/80">
+                <div className={`mt-1.5 flex min-h-[10.5rem] flex-1 gap-1.5 ${
+                    isPainter && round.phase === "draw" ? "pb-16" : ""
+                  }`}>
+                  <aside className="w-[7.25rem] shrink-0 overflow-y-auto rounded-2xl bg-surface">
                     {ranked.map((entry) => {
                       const guessed = round.correctIds.includes(entry.clientId);
                       const drawing = round.painterId === entry.clientId;
@@ -1154,10 +1120,10 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                             ) : null}
                           </span>
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[10px] font-medium text-ink">
+                            <span className="block truncate text-xs font-semibold text-ink">
                               {entry.nickname}
                             </span>
-                            <span className="block text-[9px] text-muted">
+                            <span className="block text-xs font-semibold text-ink">
                               {round.scores[entry.clientId] ?? 0}
                             </span>
                           </span>
@@ -1165,7 +1131,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                       );
                     })}
                   </aside>
-                  <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-surface/80">
+                  <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-surface">
                     <div className="flex shrink-0 items-center gap-1 px-2 pt-1.5">
                       {!isPainter && round.painterId ? (
                         <button
@@ -1185,7 +1151,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                       >
                         <ScrollText className="size-3.5" />
                       </button>
-                      <p className="min-w-0 flex-1 truncate text-[10px] font-bold uppercase tracking-[0.14em] text-muted">
+                      <p className="min-w-0 flex-1 truncate text-xs font-bold uppercase tracking-[0.14em] text-ink">
                         {copy.answersTab}
                       </p>
                     </div>
@@ -1194,12 +1160,12 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                       className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 py-1"
                     >
                       {lastWord && round.phase !== "reveal" ? (
-                        <li className="text-[11px] font-medium text-primary">
+                        <li className="text-xs font-semibold text-primary">
                           {copy.previousWord.replace("{word}", lastWord)}
                         </li>
                       ) : null}
                       {painter && round.phase === "pick" ? (
-                        <li className="text-[11px] font-medium text-ink">
+                        <li className="text-xs font-semibold text-ink">
                           {copy.turnOf.replace("{nickname}", painter.nickname)}
                         </li>
                       ) : null}
@@ -1208,15 +1174,15 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                         return (
                           <li
                             key={message.id}
-                            className={`flex items-start justify-between gap-1 text-[11px] leading-snug ${
+                            className={`flex items-start justify-between gap-1 text-xs font-semibold leading-snug ${
                               message.kind === "correct"
-                                ? "font-medium text-emerald-700"
+                                ? "text-emerald-800"
                                 : message.kind === "vote" || message.kind === "skip"
-                                  ? "font-medium text-red-700"
+                                  ? "text-red-800"
                                   : "text-ink"
                             }`}
                           >
-                            <span className={isMuted ? "italic text-muted" : undefined}>
+                            <span className={isMuted ? "italic text-ink" : undefined}>
                               {isMuted
                                 ? message.nickname
                                 : feedText(message, copy)}
@@ -1228,7 +1194,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                                 type="button"
                                 onClick={() => toggleMute(message.clientId)}
                                 aria-label={isMuted ? copy.unmute : copy.mute}
-                                className="shrink-0 text-muted"
+                                className="shrink-0 text-ink"
                               >
                                 {isMuted ? (
                                   <VolumeX className="size-3" />
@@ -1243,11 +1209,11 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                       <li ref={chatEndRef} aria-hidden className="h-px" />
                     </ul>
                     {isPainter ? (
-                      <p className="shrink-0 px-2 py-2 text-center text-[11px] font-medium text-muted">
+                      <p className="shrink-0 px-2 py-2 text-center text-xs font-semibold text-ink">
                         {copy.waitingGuesses}
                       </p>
                     ) : alreadyCorrect ? (
-                      <p className="shrink-0 px-2 py-2 text-center text-[11px] font-medium text-emerald-700">
+                      <p className="shrink-0 px-2 py-2 text-center text-xs font-semibold text-emerald-800">
                         {copy.lockedGuess}
                       </p>
                     ) : round.phase === "draw" ? (
@@ -1273,7 +1239,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                         </button>
                       </form>
                     ) : (
-                      <p className="shrink-0 px-2 py-2 text-center text-[11px] font-medium text-muted">
+                      <p className="shrink-0 px-2 py-2 text-center text-xs font-semibold text-ink">
                         {round.phase === "over"
                           ? copy.gameOver
                           : round.phase === "reveal"
@@ -1289,9 +1255,9 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
         </main>
 
         {logsOpen ? (
-          <div className="absolute inset-0 z-20 flex flex-col bg-ink/80 px-4 pt-[max(3rem,env(safe-area-inset-top))] pb-safe">
+          <div className="absolute inset-0 z-20 flex flex-col bg-ink px-4 pt-[max(3rem,env(safe-area-inset-top))] pb-safe">
             <div className="mb-3 flex items-center justify-between">
-              <p className="font-display text-xl text-background">{copy.logsTab}</p>
+              <p className="font-sans font-extrabold text-xl text-background">{copy.logsTab}</p>
               <button
                 type="button"
                 onClick={() => setLogsOpen(false)}
@@ -1303,14 +1269,14 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
             </div>
             <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto">
               {logs.length === 0 ? (
-                <li className="text-sm text-background/70">{copy.logsTab}</li>
+                <li className="text-sm font-medium text-background">{copy.logsTab}</li>
               ) : (
                 logs.map((message) => (
                   <li
                     key={message.id}
-                    className={`text-sm ${
+                    className={`text-sm font-semibold ${
                       message.kind === "vote" || message.kind === "skip"
-                        ? "text-red-300"
+                        ? "text-red-200"
                         : "text-background"
                     }`}
                   >
@@ -1325,7 +1291,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
         {leaveOpen ? (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-ink/50 px-6">
             <div className="w-full max-w-xs rounded-2xl bg-background p-5 text-center">
-              <p className="font-display text-lg text-ink">{copy.leave}</p>
+              <p className="font-sans font-extrabold text-lg text-ink">{copy.leave}</p>
               <p className="mt-2 text-sm font-medium text-ink">{copy.leaveConfirm}</p>
               <div className="mt-4 grid grid-cols-2 gap-2">
                 <button
@@ -1383,7 +1349,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
             <div className="w-full max-w-xs rounded-2xl bg-background p-5 text-center">
               <p className="text-sm font-medium text-ink">{copy.voteKick}</p>
               {voteTally && voteTally.targetId === votePrompt ? (
-                <p className="mt-2 text-xs text-muted">
+                <p className="mt-2 text-sm font-semibold text-ink">
                   {copy.voteProgress
                     .replace("{votes}", String(voteTally.votes))
                     .replace("{need}", String(voteTally.need))}
@@ -1410,12 +1376,98 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
         ) : null}
 
         {notice ? (
-          <p className="pointer-events-none absolute inset-x-6 bottom-8 rounded-2xl bg-ink px-4 py-3 text-center text-sm text-background">
+          <p className="pointer-events-none absolute inset-x-6 bottom-20 rounded-2xl bg-ink px-4 py-3 text-center text-sm text-background">
             {notice}
           </p>
         ) : null}
+
+        {isPainter && round.phase === "draw" ? (
+          <div className="absolute inset-x-0 bottom-2 z-30 flex justify-center px-1">
+            <div className="flex w-full items-center justify-between gap-2 rounded-2xl border border-white/10 bg-background/90 px-3 py-2 shadow-lift backdrop-blur-md">
+              <div className="flex items-center gap-1.5">
+                {drawConfig.colors.map((swatch) => (
+                  <button
+                    key={swatch.id}
+                    type="button"
+                    aria-label={swatch.id}
+                    onClick={() => {
+                      setEraser(false);
+                      setColor(swatch.hex);
+                    }}
+                    className={`size-7 rounded-full border-2 ${
+                      !eraser && color === swatch.hex ? "border-ink" : "border-transparent"
+                    }`}
+                    style={{ background: swatch.hex }}
+                  />
+                ))}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEraser(false);
+                    setBrush("thin");
+                  }}
+                  aria-label={copy.thinBrush}
+                  className={`flex size-8 items-center justify-center rounded-full ${
+                    !eraser && brush === "thin" ? "bg-primary" : "bg-surface"
+                  }`}
+                >
+                  <span
+                    className={`block size-1.5 rounded-full ${
+                      !eraser && brush === "thin" ? "bg-on-primary" : "bg-ink"
+                    }`}
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEraser(false);
+                    setBrush("thick");
+                  }}
+                  aria-label={copy.thickBrush}
+                  className={`flex size-8 items-center justify-center rounded-full ${
+                    !eraser && brush === "thick" ? "bg-primary" : "bg-surface"
+                  }`}
+                >
+                  <span
+                    className={`block size-2.5 rounded-full ${
+                      !eraser && brush === "thick" ? "bg-on-primary" : "bg-ink"
+                    }`}
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEraser(true)}
+                  aria-label={copy.eraser}
+                  className={`flex size-8 items-center justify-center rounded-full ${
+                    eraser ? "bg-primary text-on-primary" : "bg-surface text-ink"
+                  }`}
+                >
+                  <Eraser className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={undoBoard}
+                  aria-label={copy.undo}
+                  className="flex size-8 items-center justify-center rounded-full bg-surface"
+                >
+                  <Undo2 className="size-3.5 text-ink" />
+                </button>
+                <button
+                  type="button"
+                  onClick={clearBoard}
+                  aria-label={copy.clear}
+                  className="flex size-8 items-center justify-center rounded-full bg-surface"
+                >
+                  <Trash2 className="size-3.5 text-ink" />
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
-    </div>
+    </GameContainer>
   );
 }
 
@@ -1425,9 +1477,9 @@ function WaitPulse({ title, detail }: { title: string; detail?: string }) {
       <span className="draw-wait-icon text-5xl" aria-hidden>
         ☕
       </span>
-      <p className="mt-4 font-display text-xl leading-snug text-ink">{title}</p>
+      <p className="mt-4 font-sans font-extrabold text-xl leading-snug text-ink">{title}</p>
       {detail ? (
-        <p className="mt-2 text-sm font-medium tracking-wide text-muted">{detail}</p>
+        <p className="mt-2 text-sm font-semibold tracking-wide text-ink">{detail}</p>
       ) : null}
     </div>
   );
@@ -1450,16 +1502,16 @@ function NextPainterCard({
       animate={{ opacity: 1, y: 0 }}
       className="m-auto mx-4 max-w-sm rounded-3xl bg-primary px-5 py-7 text-center shadow-lift"
     >
-      <p className="font-display text-2xl text-on-primary">{title}</p>
+      <p className="font-sans font-extrabold text-2xl text-on-primary">{title}</p>
       <p className="mt-4 text-5xl" aria-hidden>
         {painter?.avatar ?? "☕"}
       </p>
-      <p className="mt-3 text-xs font-bold uppercase tracking-[0.16em] text-on-primary/80">
+      <p className="mt-3 text-sm font-bold uppercase tracking-[0.16em] text-on-primary">
         {label}
       </p>
-      <p className="font-display text-2xl text-on-primary">{painter?.nickname ?? ""}</p>
+      <p className="font-sans font-extrabold text-2xl text-on-primary">{painter?.nickname ?? ""}</p>
       {lastWord ? (
-        <p className="mt-3 text-xs font-medium text-on-primary/90">{lastWord}</p>
+        <p className="mt-3 text-sm font-semibold text-on-primary">{lastWord}</p>
       ) : null}
     </motion.div>
   );
@@ -1485,13 +1537,13 @@ function IntermissionStage({
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        className="m-auto flex flex-col items-center px-4 text-center"
+        className="m-auto mx-4 max-w-sm rounded-3xl border border-[var(--card-border)] bg-[var(--card-surface)] px-5 py-7 text-center shadow-lift"
       >
-        <p className="font-display text-2xl text-ink">{copy.skippedTitle}</p>
+        <p className="font-sans text-2xl font-extrabold tracking-tight text-[var(--text-headline)]">{copy.skippedTitle}</p>
         <span className="draw-sad-icon mt-3 text-5xl" aria-hidden>
           😢☕
         </span>
-        <p className="mt-3 text-sm font-medium text-muted">
+        <p className="mt-3 font-sans text-sm font-medium text-[var(--text-body)]">
           {copy.skippedLead.replace("{nickname}", painterName)}
         </p>
       </motion.div>
@@ -1503,14 +1555,14 @@ function IntermissionStage({
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        className="m-auto flex flex-col items-center px-4 text-center"
+        className="m-auto mx-4 max-w-sm rounded-3xl border border-[var(--card-border)] bg-[var(--card-surface)] px-5 py-7 text-center shadow-lift"
       >
-        <p className="font-display text-2xl text-ink">{copy.intermission}</p>
-        <p className="mt-1 text-sm font-medium text-muted">{copy.restLead}</p>
+        <p className="font-sans text-2xl font-extrabold tracking-tight text-[var(--text-headline)]">{copy.intermission}</p>
+        <p className="mt-1 font-sans text-sm font-medium text-[var(--text-body)]">{copy.restLead}</p>
         <div className="draw-sad-icon mt-4 text-5xl" aria-hidden>
           🎨☕
         </div>
-        <p className="mt-4 font-display text-lg text-ink">{copy.nobodyGuessed}</p>
+        <p className="mt-4 font-sans text-lg font-extrabold text-[var(--text-headline)]">{copy.nobodyGuessed}</p>
       </motion.div>
     );
   }
@@ -1519,17 +1571,17 @@ function IntermissionStage({
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="m-auto flex flex-col items-center px-4 text-center"
+      className="m-auto mx-4 max-w-sm rounded-3xl border border-[var(--card-border)] bg-[var(--card-surface)] px-5 py-7 text-center shadow-lift"
     >
-      <p className="font-display text-2xl text-ink">{copy.intermission}</p>
-      <p className="mt-1 text-sm font-medium text-muted">{copy.restLead}</p>
+      <p className="font-sans text-2xl font-extrabold tracking-tight text-[var(--text-headline)]">{copy.intermission}</p>
+      <p className="mt-1 font-sans text-sm font-medium text-[var(--text-body)]">{copy.restLead}</p>
       <span className="draw-wait-icon mt-3 text-5xl" aria-hidden>
         ☕
       </span>
-      <p className="mt-2 font-display text-2xl text-ink">
+      <p className="mt-2 font-sans text-2xl font-extrabold tracking-tight text-[var(--text-headline)]">
         {copy.wordReveal.replace("{word}", word)}
       </p>
-      <p className="mt-1 text-xs font-medium text-muted">
+      <p className="mt-1 font-sans text-sm font-medium text-[var(--text-body)]">
         {copy.guessedCount.replace("{count}", String(guessedCount))}
       </p>
     </motion.div>
@@ -1552,9 +1604,9 @@ function PodiumStage({
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="m-auto flex w-full flex-col items-center px-3 text-center"
+      className="m-auto mx-3 flex w-[calc(100%-1.5rem)] max-w-sm flex-col items-center rounded-3xl border border-[var(--card-border)] bg-[var(--card-surface)] px-3 py-6 text-center shadow-lift"
     >
-      <p className="font-display text-2xl text-ink">{copy.gameOver}</p>
+      <p className="font-sans text-2xl font-extrabold tracking-tight text-[var(--text-headline)]">{copy.gameOver}</p>
       <div className="mt-5 flex w-full items-end justify-center gap-2">
         <PodiumSeat
           occupant={second}
@@ -1573,11 +1625,11 @@ function PodiumStage({
         />
       </div>
       {first ? (
-        <p className="mt-3 text-xs font-medium text-muted">
+        <p className="mt-3 font-sans text-sm font-medium text-[var(--text-body)]">
           {copy.winnerLine.replace("{nickname}", first.nickname)}
         </p>
       ) : null}
-      <p className="mt-1 text-[10px] font-medium text-muted">
+      <p className="mt-1 font-sans text-sm font-medium text-[var(--text-body)]">
         {copy.scoreGoal.replace("{score}", String(drawWinScore()))}
       </p>
     </motion.div>
@@ -1615,10 +1667,10 @@ function PodiumSeat({
           {place}
         </span>
       </div>
-      <p className="mt-2 max-w-[5.5rem] truncate text-xs font-medium text-ink">
+      <p className="mt-2 max-w-[5.5rem] truncate font-sans text-xs font-semibold text-[var(--text-headline)]">
         {occupant.nickname}
       </p>
-      <p className="text-[10px] text-muted">{score}</p>
+      <p className="font-sans text-xs font-semibold text-[var(--text-body)]">{score}</p>
     </div>
   );
 }

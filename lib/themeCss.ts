@@ -1,4 +1,10 @@
 import { tenantConfig, type ThemeTokens } from "@/config/tenant.config";
+import { isDarkHex } from "@/lib/tenant";
+
+function tabActivePair(theme: ThemeTokens): { bg: string; text: string } {
+  const bg = isDarkHex(theme.textDark) ? theme.textDark : "#0d0d0d";
+  return { bg, text: "#ffffff" };
+}
 
 function toKebab(key: string): string {
   return key.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`);
@@ -14,6 +20,18 @@ export function themeVarEntries(
     ["--bg", theme.background],
     ["--card-bg", theme.surface],
     ["--accent", theme.primaryHover],
+    ["--bg-canvas", theme.background],
+    ["--text-headline", theme.textDark],
+    ["--text-body", theme.textMuted],
+    ["--btn-primary", theme.primary],
+    ["--btn-text", theme.onPrimary],
+    ["--card-surface", theme.surface],
+    [
+      "--card-border",
+      `color-mix(in srgb, ${theme.textDark} 20%, transparent)`,
+    ],
+    ["--tab-active-bg", tabActivePair(theme).bg],
+    ["--tab-active-text", tabActivePair(theme).text],
   ];
 }
 

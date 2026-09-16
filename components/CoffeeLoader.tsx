@@ -12,13 +12,12 @@ export function CoffeeLoader({ fading = false }: CoffeeLoaderProps) {
   const campaign = useCampaign();
   const lounge = isLoungeVenue({ category: campaign.category });
   const message = splashMessage(campaign.brandName);
-  const background = campaign.themeConfig.bg;
   const hookahSrc = tenantConfig.assets.hookahGif || tenantConfig.copy.splash.hookahSrc;
 
   return (
     <div
       className={`coffee-splash ${fading ? "coffee-splash-out" : ""}`}
-      style={{ background }}
+      style={{ background: "var(--background)" }}
       role="status"
       aria-live="polite"
       aria-busy={!fading}

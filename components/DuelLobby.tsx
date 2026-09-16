@@ -6,31 +6,22 @@ import {
   ArrowLeftRight,
   Brain,
   Check,
-  ChevronRight,
   Clapperboard,
   Dices,
   Hash,
-  KeyRound,
-  Pencil,
   Radio,
   Shuffle,
   Smile,
   Swords,
-  Users,
   UserRound,
   X,
   type LucideProps,
 } from "lucide-react";
 import { useDuel } from "@/components/DuelProvider";
 import { DuelLeaderboard } from "@/components/DuelLeaderboard";
+import { RewardProgressBar } from "@/components/RewardProgressBar";
 import { tenantConfig, type DuelGameId } from "@/config/tenant.config";
 import { commonGames } from "@/lib/duel";
-import {
-  cafeDrawRoomId,
-  makeDrawPin,
-  parseDrawPin,
-  privateDrawRoomId,
-} from "@/lib/drawGame";
 
 export function DuelExperience() {
   const copy = tenantConfig.copy.duel;
@@ -66,7 +57,15 @@ export function DuelExperience() {
   );
 }
 
-export function DuelLobbyDrawer({ onClose }: { onClose: () => void }) {
+export function DuelLobbyDrawer({
+  onClose,
+  focusGame,
+  variant = "drawer",
+}: {
+  onClose: () => void;
+  focusGame?: DuelGameId;
+  variant?: "drawer" | "page";
+}) {
   const copy = tenantConfig.copy.duel;
   const {
     tenantId,
@@ -81,13 +80,12 @@ export function DuelLobbyDrawer({ onClose }: { onClose: () => void }) {
     setSelectedGame,
     sendChallenge,
     player,
-    joinDrawRoom,
   } = useDuel();
   const [nicknamePickerOpen, setNicknamePickerOpen] = useState(false);
-  const [drawSelected, setDrawSelected] = useState(false);
-  const [pinInput, setPinInput] = useState("");
-  const [pinError, setPinError] = useState(false);
-  const drawCopy = copy.draw;
+
+  useEffect(() => {
+    if (focusGame) setSelectedGame(focusGame);
+  }, [focusGame, setSelectedGame]);
 
   useEffect(() => {
     const previous = document.body.style.overflow;
@@ -113,45 +111,46 @@ export function DuelLobbyDrawer({ onClose }: { onClose: () => void }) {
     sendChallenge(target);
   }
 
-  function createPrivateRoom() {
-    joinDrawRoom(privateDrawRoomId(tenantId, makeDrawPin()));
-    onClose();
-  }
-
-  function joinPrivateRoom() {
-    const pin = parseDrawPin(pinInput);
-    if (!pin) {
-      setPinError(true);
-      return;
-    }
-    setPinError(false);
-    joinDrawRoom(privateDrawRoomId(tenantId, pin));
-    onClose();
-  }
+  const page = variant === "page";
 
   return (
     <motion.div
-      className="fixed inset-0 z-[60] flex items-end justify-center"
-      initial={{ opacity: 0 }}
+      className={
+        page
+          ? "relative flex flex-1 flex-col"
+          : "fixed inset-0 z-[60] flex items-end justify-center"
+      }
+      initial={page ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
+      exit={page ? undefined : { opacity: 0 }}
     >
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label={copy.close}
-        className="absolute inset-0 bg-ink/55"
-      />
+      {page ? null : (
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={copy.close}
+          className="absolute inset-0 bg-ink/55"
+        />
+      )}
       <motion.section
-        role="dialog"
-        aria-modal="true"
-        initial={{ y: "100%" }}
+        role={page ? undefined : "dialog"}
+        aria-modal={page ? undefined : true}
+        initial={page ? false : { y: "100%" }}
         animate={{ y: 0 }}
-        exit={{ y: "100%" }}
+        exit={page ? undefined : { y: "100%" }}
         transition={{ type: "spring", stiffness: 340, damping: 32 }}
-        className="relative z-10 max-h-[94dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-background px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 shadow-lift"
+        className={
+          page
+            ? "relative z-10 flex flex-1 flex-col bg-background"
+            : "relative z-10 max-h-[94dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-background px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 shadow-lift"
+        }
       >
-        <div className="mx-auto h-1.5 w-12 rounded-full bg-ink/15" />
+        {page ? null : <div className="mx-auto h-1.5 w-12 rounded-full bg-ink/15" />}
+        {page ? null : (
+          <div className="mt-3">
+            <RewardProgressBar />
+          </div>
+        )}
         <div className="mt-2 flex items-start justify-between gap-3">
           <div>
             <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-red-500">
@@ -207,40 +206,31 @@ export function DuelLobbyDrawer({ onClose }: { onClose: () => void }) {
             {copy.selectGameTitle}
           </p>
           <div className="mt-2 grid grid-cols-2 gap-2.5">
-            <GameCard
-              active={!drawSelected && selectedGame === "random"}
-              onClick={() => {
-                setDrawSelected(false);
-                setSelectedGame("random");
-              }}
-              icon={Shuffle}
-              label={copy.randomGameLabel}
-              description={copy.randomGameDescription}
-            />
-            {enabledGames.map((id) => (
+            {focusGame ? null : (
+              <GameCard
+                active={selectedGame === "random"}
+                onClick={() => setSelectedGame("random")}
+                icon={Shuffle}
+                label={copy.randomGameLabel}
+                description={copy.randomGameDescription}
+              />
+            )}
+            {enabledGames
+              .filter((id) => !focusGame || id === focusGame)
+              .map((id) => (
               <GameCard
                 key={id}
-                active={!drawSelected && selectedGame === id}
-                onClick={() => {
-                  setDrawSelected(false);
-                  setSelectedGame(id);
-                }}
+                active={selectedGame === id}
+                onClick={() => setSelectedGame(id)}
                 icon={gameIcon(id)}
                 label={copy.gameLabels[id]}
                 description={copy.gameDescriptions[id]}
               />
             ))}
-            <GameCard
-              active={drawSelected}
-              onClick={() => setDrawSelected(true)}
-              icon={Pencil}
-              label={drawCopy.title}
-              description={drawCopy.description}
-            />
           </div>
         </div>
 
-        {selectedGame === "quiz" && !drawSelected ? (
+        {selectedGame === "quiz" ? (
           <DuelLeaderboard tenantId={tenantId} player={player} />
         ) : null}
 
@@ -276,95 +266,15 @@ export function DuelLobbyDrawer({ onClose }: { onClose: () => void }) {
           ) : null}
         </div>
 
-        {drawSelected ? (
-          <div className="mt-5 space-y-3">
-            <button
-              type="button"
-              onClick={() => {
-                joinDrawRoom(cafeDrawRoomId(tenantId));
-                onClose();
-              }}
-              disabled={!connected}
-              className="flex min-h-[5.5rem] w-full items-center gap-3 rounded-2xl bg-primary px-4 py-4 text-left text-on-primary shadow-lift transition-transform active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-white/15">
-                <Users className="size-5" aria-hidden />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block font-display text-lg leading-tight">
-                  {drawCopy.cafeRoom}
-                </span>
-                <span className="mt-1 block text-sm leading-snug text-on-primary/80">
-                  {drawCopy.cafeRoomHint}
-                </span>
-              </span>
-              <ChevronRight className="size-5 shrink-0 opacity-80" aria-hidden />
-            </button>
-
-            <div className="rounded-2xl bg-surface px-4 py-4">
-              <p className="font-display text-lg text-ink">{drawCopy.privateRoom}</p>
-              <p className="mt-1 text-sm font-medium leading-snug tracking-wide text-muted">
-                {drawCopy.privateRoomHint}
-              </p>
-              <button
-                type="button"
-                onClick={createPrivateRoom}
-                disabled={!connected}
-                className="mt-4 flex min-h-[4.5rem] w-full flex-col items-center justify-center rounded-2xl bg-primary px-4 py-3 text-on-primary shadow-sm transition-transform active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <span className="flex items-center gap-2 font-display text-base">
-                  <KeyRound className="size-4" aria-hidden />
-                  {drawCopy.createPin}
-                </span>
-                <span className="mt-1 text-center text-[11px] font-medium leading-snug text-on-primary/80">
-                  {drawCopy.createPinHint}
-                </span>
-              </button>
-              <p className="mt-4 text-[10px] font-medium uppercase tracking-[0.16em] text-muted">
-                {drawCopy.joinPinHint}
-              </p>
-              <form
-                className="mt-2 flex gap-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  joinPrivateRoom();
-                }}
-              >
-                <input
-                  value={pinInput}
-                  onChange={(event) => {
-                    setPinInput(event.target.value.replace(/\D/g, "").slice(0, 4));
-                    setPinError(false);
-                  }}
-                  inputMode="numeric"
-                  autoComplete="off"
-                  placeholder={drawCopy.pinPlaceholder}
-                  className="field-input min-h-14 flex-1 text-center font-display text-xl tracking-[0.35em]"
-                />
-                <button
-                  type="submit"
-                  disabled={!connected || pinInput.length !== 4}
-                  className="btn-secondary min-h-14 shrink-0 px-4 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {drawCopy.joinPin}
-                </button>
-              </form>
-              {pinError ? (
-                <p className="mt-2 text-xs font-medium text-red-600">{drawCopy.pinInvalid}</p>
-              ) : null}
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={findMatch}
-            disabled={!connected || eligiblePeers.length === 0}
-            className="btn-primary mt-5 w-full gap-2 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Check className="size-4" />
-            {copy.matchRandom}
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={findMatch}
+          disabled={!connected || eligiblePeers.length === 0}
+          className="btn-primary mt-5 w-full gap-2 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Check className="size-4" />
+          {copy.matchRandom}
+        </button>
       </motion.section>
       <AnimatePresence>
         {nicknamePickerOpen ? (
