@@ -3,9 +3,13 @@ import { filterProfanity } from "@/lib/profanityFilter";
 import { getSupabase, wakeRealtime } from "@/lib/supabase";
 
 export const LAST_GOSSIP_TIME_KEY = "last_gossip_time";
+export const LAST_GOSSIP_ANSWER_KEY = "last_gossip_answer_id";
 export const LIKED_GOSSIPS_KEY = "liked_gossips";
 export const GOSSIP_COOLDOWN_MS = 120_000;
 export const GOSSIP_MAX_CHARS = 120;
+
+let memoryGossipSentAt: number | null = null;
+let memoryLastAnswerId: string | null = null;
 
 export type DailyQuestion = {
   id: string;
@@ -29,7 +33,8 @@ export type DailyAnswer = {
 type QuestionRow = {
   id: string;
   tenant_id: string;
-  prompt: string;
+  prompt?: string | null;
+  question?: string | null;
   is_active: boolean;
   created_at: string;
 };
@@ -49,7 +54,7 @@ function questionFromRow(row: QuestionRow): DailyQuestion {
   return {
     id: row.id,
     tenantId: row.tenant_id,
-    prompt: row.prompt,
+    prompt: (row.prompt || row.question || "").trim(),
     isActive: row.is_active,
     createdAt: row.created_at,
   };
@@ -81,17 +86,45 @@ function readNumber(key: string): number | null {
 }
 
 export function gossipCooldownRemaining(): number {
-  const last = readNumber(LAST_GOSSIP_TIME_KEY);
+  const last = readNumber(LAST_GOSSIP_TIME_KEY) ?? memoryGossipSentAt;
   if (last == null) return 0;
   return Math.max(0, GOSSIP_COOLDOWN_MS - (Date.now() - last));
 }
 
+export function formatGossipClock(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
 export function markGossipSent(): void {
+  memoryGossipSentAt = Date.now();
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(LAST_GOSSIP_TIME_KEY, String(Date.now()));
+    window.localStorage.setItem(LAST_GOSSIP_TIME_KEY, String(memoryGossipSentAt));
   } catch {
     // Private mode may block storage.
+  }
+}
+
+export function readLastGossipAnswerId(): string | null {
+  if (memoryLastAnswerId) return memoryLastAnswerId;
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(LAST_GOSSIP_ANSWER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function rememberLastGossipAnswer(id: string): void {
+  memoryLastAnswerId = id;
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(LAST_GOSSIP_ANSWER_KEY, id);
+  } catch {
+    // ignore
   }
 }
 
@@ -121,9 +154,12 @@ export function rememberLikedGossip(id: string): string[] {
 }
 
 export function clearGossipLocalState(): void {
+  memoryGossipSentAt = null;
+  memoryLastAnswerId = null;
   if (typeof window === "undefined") return;
   try {
     window.localStorage.removeItem(LAST_GOSSIP_TIME_KEY);
+    window.localStorage.removeItem(LAST_GOSSIP_ANSWER_KEY);
     window.localStorage.removeItem(LIKED_GOSSIPS_KEY);
   } catch {
     // ignore
@@ -138,7 +174,7 @@ export async function fetchActiveQuestion(
     if (!supabase || !tenantId) return null;
     const { data, error } = await supabase
       .from("daily_questions")
-      .select("id, tenant_id, prompt, is_active, created_at")
+      .select("*")
       .eq("tenant_id", tenantId)
       .eq("is_active", true)
       .order("created_at", { ascending: false })
@@ -179,22 +215,106 @@ export async function fetchDailyAnswers(
   }
 }
 
-export async function publishDailyQuestion(
-  tenantId: string,
-  prompt: string,
-): Promise<DailyQuestion | null> {
+export async function fetchDailyAnswerById(
+  id: string,
+): Promise<DailyAnswer | null> {
   try {
     const supabase = getSupabase();
-    if (!supabase || !tenantId) return null;
-    const { data, error } = await supabase.rpc("publish_daily_question", {
-      p_tenant_id: tenantId,
-      p_prompt: prompt.trim(),
-    });
-    if (error || !Array.isArray(data) || data.length === 0) return null;
-    return questionFromRow(data[0] as QuestionRow);
+    if (!supabase || !id) return null;
+    const { data, error } = await supabase
+      .from("daily_answers")
+      .select(
+        "id, tenant_id, question_id, author_label, body, like_count, is_hidden, created_at",
+      )
+      .eq("id", id)
+      .maybeSingle();
+    if (error || !data) return null;
+    return answerFromRow(data as AnswerRow);
   } catch {
     return null;
   }
+}
+
+export type PublishQuestionResult =
+  | { ok: true; question: DailyQuestion }
+  | { ok: false; error: string };
+
+async function insertDailyQuestion(
+  tenantId: string,
+  questionText: string,
+): Promise<PublishQuestionResult> {
+  const supabase = getSupabase();
+  if (!supabase) return { ok: false, error: "offline" };
+  const text = questionText.trim();
+  const { data, error } = await supabase
+    .from("daily_questions")
+    .insert([
+      {
+        tenant_id: tenantId,
+        prompt: text,
+        question: text,
+        is_active: true,
+      },
+    ])
+    .select();
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!error && row) {
+    return { ok: true, question: questionFromRow(row as QuestionRow) };
+  }
+  console.error("Yayınlama hatası:", error);
+  const message = error?.message ?? "unknown";
+  const fallbackPayload = message.toLowerCase().includes("question")
+    ? { tenant_id: tenantId, prompt: text, is_active: true }
+    : message.toLowerCase().includes("prompt")
+      ? { tenant_id: tenantId, question: text, is_active: true }
+      : null;
+  if (!fallbackPayload) return { ok: false, error: message };
+  const retry = await supabase
+    .from("daily_questions")
+    .insert([fallbackPayload])
+    .select();
+  const retryRow = Array.isArray(retry.data) ? retry.data[0] : retry.data;
+  if (retry.error || !retryRow) {
+    console.error("Yayınlama hatası:", retry.error);
+    return { ok: false, error: retry.error?.message ?? message };
+  }
+  return { ok: true, question: questionFromRow(retryRow as QuestionRow) };
+}
+
+export async function publishDailyQuestion(
+  tenantId: string,
+  questionText: string,
+): Promise<PublishQuestionResult> {
+  const text = questionText.trim();
+  if (!text) return { ok: false, error: "empty" };
+  const supabase = getSupabase();
+  if (!supabase || !tenantId) return { ok: false, error: "offline" };
+
+  try {
+    const deactivated = await supabase
+      .from("daily_questions")
+      .update({ is_active: false })
+      .eq("tenant_id", tenantId);
+    if (deactivated.error) {
+      console.error("Yayınlama hatası:", deactivated.error);
+    }
+  } catch (error) {
+    console.error("Yayınlama hatası:", error);
+  }
+
+  const first = await insertDailyQuestion(tenantId, text);
+  if (first.ok) return first;
+  if (!first.error.toLowerCase().includes("unique")) return first;
+
+  try {
+    await supabase
+      .from("daily_questions")
+      .update({ is_active: false })
+      .eq("tenant_id", tenantId);
+  } catch (error) {
+    console.error("Yayınlama hatası:", error);
+  }
+  return insertDailyQuestion(tenantId, text);
 }
 
 export async function submitDailyAnswer(input: {
@@ -228,6 +348,7 @@ export async function submitDailyAnswer(input: {
       .single();
     if (error || !data) return { ok: false, reason: "offline" };
     markGossipSent();
+    rememberLastGossipAnswer(data.id);
     return { ok: true, answer: answerFromRow(data as AnswerRow) };
   } catch {
     return { ok: false, reason: "offline" };
@@ -276,6 +397,7 @@ export function subscribeDailyFeed(
     onQuestion?: (question: DailyQuestion) => void;
     onAnswer?: (answer: DailyAnswer) => void;
     onAnswerUpdate?: (answer: DailyAnswer) => void;
+    onAnswerDelete?: (id: string) => void;
   },
 ): () => void {
   const supabase = getSupabase();
@@ -323,6 +445,20 @@ export function subscribeDailyFeed(
         const row = payload.new as AnswerRow | undefined;
         if (!row?.id) return;
         handlers.onAnswerUpdate?.(answerFromRow(row));
+      },
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "DELETE",
+        schema: "public",
+        table: "daily_answers",
+        filter: `tenant_id=eq.${tenantId}`,
+      },
+      (payload) => {
+        const row = payload.old as { id?: string } | undefined;
+        if (!row?.id) return;
+        handlers.onAnswerDelete?.(row.id);
       },
     )
     .subscribe();

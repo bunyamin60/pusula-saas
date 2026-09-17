@@ -16,6 +16,10 @@ export const GUEST_PALETTE_IDS: GuestPaletteId[] = [
   "minimal-orange",
   "modern-purple",
   "neon-teal",
+  "dark-orange",
+  "midnight-pink",
+  "emerald-gold",
+  "cyber-purple",
 ];
 
 const PRESET_IDS: ThemePresetId[] = [
@@ -212,7 +216,12 @@ export function tokensFromThemeConfig(config?: TenantThemeConfig | null): ThemeT
   const paletteId = resolveGuestPaletteId(parsed);
   const preset =
     tenantConfig.themePresets[paletteId] ?? tenantConfig.themePresets["sun-mint"];
-  return { ...preset.tokens };
+  const tokens = { ...preset.tokens };
+  if (isDarkHex(tokens.background)) {
+    tokens.textDark = "#fffffe";
+    tokens.onSurface = "#fffffe";
+  }
+  return tokens;
 }
 
 export function isDarkHex(hex: string): boolean {

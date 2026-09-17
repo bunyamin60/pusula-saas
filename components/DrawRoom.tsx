@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent } from "react";
 import { motion } from "framer-motion";
 import { AlertTriangle, Eraser, ScrollText, Send, Trash2, Undo2, Volume2, VolumeX, X } from "lucide-react";
 import { DrawCanvas } from "@/components/DrawCanvas";
@@ -35,6 +29,7 @@ import {
   painterOrderOf,
   pickDrawWords,
   pinFromRoomId,
+  scoreDrawGuess,
   withOccupantScores,
   wordLetterCount,
   drawPainterBonus,
@@ -848,6 +843,12 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
   function submitGuess() {
     const text = guess.trim();
     if (!text || isPainter || alreadyCorrect || round.phase !== "draw") return;
+    if (round.word && scoreDrawGuess(text, round.word) === "close") {
+      setNotice(copy.closeGuess);
+      window.setTimeout(() => {
+        setNotice((current) => (current === copy.closeGuess ? null : current));
+      }, 2400);
+    }
     const payload: GuessPayload = {
       clientId: player.clientId,
       nickname: player.nickname,
@@ -857,6 +858,13 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
     setGuess("");
     send("guess", payload);
     if (isHostRef.current) hostApiRef.current?.applyGuess(payload);
+  }
+
+  function handleGuessFocus(event: FocusEvent<HTMLInputElement>) {
+    const target = event.target;
+    window.setTimeout(() => {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 300);
   }
 
   function pickWord(word: string) {
@@ -954,7 +962,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
             </div>
           ) : null}
 
-        <main className="flex min-h-0 flex-1 flex-col">
+        <main className="flex min-h-0 flex-1 flex-col justify-between">
           {!connected ? (
             <WaitPulse title={supabase ? copy.connecting : copy.unavailable} />
           ) : round.phase === "lobby" ? (
@@ -1010,7 +1018,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
             </div>
           ) : (
             <>
-              <section className="relative flex min-h-0 flex-[1.45] flex-col overflow-hidden rounded-2xl bg-white">
+              <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white">
                 {isPainter && round.phase === "draw" ? (
                   <p className="pointer-events-none absolute left-2 right-2 top-2 z-10 truncate rounded-xl bg-primary px-3 py-1.5 text-center text-sm font-semibold text-on-primary">
                     {copy.secretWord.replace("{word}", round.word ?? "")}
@@ -1092,7 +1100,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
               </section>
 
               {showChrome ? (
-                <div className={`mt-1.5 flex min-h-[10.5rem] flex-1 gap-1.5 ${
+                <div className={`mt-1.5 flex min-h-0 flex-1 gap-1.5 ${
                     isPainter && round.phase === "draw" ? "pb-16" : ""
                   }`}>
                   <aside className="w-[7.25rem] shrink-0 overflow-y-auto rounded-2xl bg-surface">
@@ -1216,29 +1224,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                       <p className="shrink-0 px-2 py-2 text-center text-xs font-semibold text-emerald-800">
                         {copy.lockedGuess}
                       </p>
-                    ) : round.phase === "draw" ? (
-                      <form
-                        className="flex shrink-0 gap-1.5 border-t border-primary/10 p-1.5"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          submitGuess();
-                        }}
-                      >
-                        <input
-                          value={guess}
-                          onChange={(event) => setGuess(event.target.value)}
-                          placeholder={copy.guessPlaceholder}
-                          className="field-input min-h-10 flex-1 text-sm"
-                        />
-                        <button
-                          type="submit"
-                          aria-label={copy.guessSend}
-                          className="btn-primary min-h-10 px-3"
-                        >
-                          <Send className="size-4" />
-                        </button>
-                      </form>
-                    ) : (
+                    ) : round.phase === "draw" ? null : (
                       <p className="shrink-0 px-2 py-2 text-center text-xs font-semibold text-ink">
                         {round.phase === "over"
                           ? copy.gameOver
@@ -1249,6 +1235,32 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
                     )}
                   </section>
                 </div>
+              ) : null}
+              {!isPainter && !alreadyCorrect && round.phase === "draw" ? (
+                <form
+                  className="sticky bottom-0 z-40 flex shrink-0 gap-1.5 border-t border-[var(--border)] bg-[var(--card-surface)]/95 p-3 backdrop-blur-md"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    submitGuess();
+                  }}
+                >
+                  <input
+                    value={guess}
+                    onChange={(event) => setGuess(event.target.value)}
+                    onFocus={handleGuessFocus}
+                    placeholder={copy.guessPlaceholder}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    className="field-input min-h-12 flex-1 text-sm"
+                  />
+                  <button
+                    type="submit"
+                    aria-label={copy.guessSend}
+                    className="btn-primary min-h-12 px-4"
+                  >
+                    <Send className="size-4" />
+                  </button>
+                </form>
               ) : null}
             </>
           )}
@@ -1376,7 +1388,7 @@ export function DrawRoom({ roomId, tenantId, player, onExit }: DrawRoomProps) {
         ) : null}
 
         {notice ? (
-          <p className="pointer-events-none absolute inset-x-6 bottom-20 rounded-2xl bg-ink px-4 py-3 text-center text-sm text-background">
+          <p className="pointer-events-none absolute inset-x-6 bottom-28 z-50 rounded-2xl bg-ink px-4 py-3 text-center text-sm text-background">
             {notice}
           </p>
         ) : null}

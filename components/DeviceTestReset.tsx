@@ -10,6 +10,7 @@ import { clearPlayRewardProgress } from "@/lib/playReward";
 import { clearCustomerProfile } from "@/lib/customerProfile";
 import { clearGossipLocalState } from "@/lib/dailyQuestion";
 import { resetSession } from "@/lib/session";
+import { clearStampCard } from "@/lib/stampCard";
 import { DEFAULT_TENANT_ID } from "@/lib/tenant";
 
 export function DeviceTestReset() {
@@ -26,6 +27,7 @@ export function DeviceTestReset() {
       resetSession();
       clearCustomerProfile();
       clearGossipLocalState();
+      clearStampCard(tenantId);
     } catch {
       // Test helper must never throw into the guest flow.
     }

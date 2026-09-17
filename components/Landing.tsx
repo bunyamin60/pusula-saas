@@ -1,11 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Award, Medal, Trophy } from "lucide-react";
 import { ArcadeGameCard } from "@/components/ArcadeGameCard";
 import { CustomerAuthModal } from "@/components/CustomerAuthModal";
 import { DailyQuestionFeed } from "@/components/DailyQuestionFeed";
 import { DeviceTestReset } from "@/components/DeviceTestReset";
+import { LoyaltyStampCard } from "@/components/LoyaltyStampCard";
 import { useDuel } from "@/components/DuelProvider";
 import { tenantConfig } from "@/config/tenant.config";
 import { arcadeGameCopy, featuredArcadeGames } from "@/lib/gameCatalog";
@@ -13,6 +16,11 @@ import {
   readCustomerProfile,
   type CustomerProfile,
 } from "@/lib/customerProfile";
+import {
+  fetchQuizLeaderboard,
+  type ArcadeScoreGame,
+  type QuizLeaderboardEntry,
+} from "@/lib/duelLeaderboard";
 import { resolveLogoUrl } from "@/lib/tenant";
 import { useCampaign } from "@/lib/useCampaign";
 
@@ -140,20 +148,41 @@ export function Landing() {
       {tab === "games" ? (
         <div className="-mx-5 mt-1 grid grid-cols-2 gap-3 px-4 pb-3 pt-2">
           {visible.map((game) => {
-            const { title, badge } = arcadeGameCopy(game.id);
+            const { title, badge, caption } = arcadeGameCopy(game.id);
             return (
               <ArcadeGameCard
                 key={game.id}
                 game={game}
                 title={title}
                 badge={badge}
+                caption={caption}
                 onClick={() => router.push(`/${tenantId}${game.path}`)}
               />
             );
           })}
         </div>
       ) : tab === "events" ? (
-        <DailyQuestionFeed tenantId={tenantId} clientId={player.clientId} />
+        <div className="space-y-4">
+          <LoyaltyStampCard
+            tenantId={tenantId}
+            clientId={player.clientId}
+            tableId={tenantConfig.brand.tableName}
+          />
+          <DailyQuestionFeed tenantId={tenantId} clientId={player.clientId} />
+          <EventsRaceCard
+            tenantId={tenantId}
+            gameType="quiz"
+            href={`/${tenantId}/trivia`}
+            copy={copy.race}
+          />
+          <EventsRaceCard
+            tenantId={tenantId}
+            gameType="blockblast"
+            href={`/${tenantId}/blockblast`}
+            copy={copy.blastRace}
+            medals
+          />
+        </div>
       ) : (
         <p className="mt-8 text-center font-sans text-sm font-medium text-muted">
           {copy.surveysEmpty}
@@ -174,6 +203,106 @@ export function Landing() {
       />
     </section>
   );
+}
+
+function EventsRaceCard({
+  tenantId,
+  gameType,
+  href,
+  copy,
+  medals = false,
+}: {
+  tenantId: string;
+  gameType: ArcadeScoreGame;
+  href: string;
+  copy: {
+    kicker: string;
+    title: string;
+    cta: string;
+    loading: string;
+    empty: string;
+    points: string;
+  };
+  medals?: boolean;
+}) {
+  const [entries, setEntries] = useState<QuizLeaderboardEntry[] | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void fetchQuizLeaderboard(tenantId, undefined, gameType).then((result) => {
+      if (active) setEntries(result.filter((entry) => entry.rank <= 5).slice(0, 5));
+    });
+    return () => {
+      active = false;
+    };
+  }, [gameType, tenantId]);
+
+  return (
+    <section className="rounded-3xl border border-[var(--border)] bg-[var(--card-surface)] p-5 shadow-sm">
+      <div className="flex items-center gap-2">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-[var(--btn-primary)] text-[var(--btn-text)]">
+          <Trophy className="size-4" aria-hidden />
+        </span>
+        <div className="min-w-0">
+          <p className="font-sans text-[11px] font-black uppercase tracking-wider text-[var(--text-headline)]">
+            {copy.kicker}
+          </p>
+          <p className="mt-0.5 font-sans text-sm font-extrabold tracking-tight text-[var(--text-headline)]">
+            {copy.title}
+          </p>
+        </div>
+      </div>
+
+      {entries == null ? (
+        <p className="mt-4 text-center font-sans text-sm font-medium text-[var(--text-body)]">
+          {copy.loading}
+        </p>
+      ) : entries.length === 0 ? (
+        <p className="mt-4 text-center font-sans text-sm font-medium text-[var(--text-body)]">
+          {copy.empty}
+        </p>
+      ) : (
+        <ol className="mt-4 space-y-1.5">
+          {entries.map((entry) => (
+            <li
+              key={entry.clientId}
+              className="grid grid-cols-[2rem_1fr_auto] items-center gap-2 rounded-2xl border border-[var(--border)] bg-black/20 px-3 py-2"
+            >
+              <span className="flex items-center justify-center font-sans text-xs font-black tabular-nums text-[var(--text-headline)]">
+                {medals ? <RankMedal rank={entry.rank} /> : `#${entry.rank}`}
+              </span>
+              <span className="min-w-0 truncate font-sans text-sm font-semibold text-[var(--text-headline)]">
+                {entry.nickname}
+              </span>
+              <span className="font-sans text-xs font-bold tabular-nums text-[var(--text-body)]">
+                {copy.points.replace("{score}", String(entry.score))}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      <Link
+        href={href}
+        className="mt-4 flex min-h-12 w-full items-center justify-center rounded-2xl bg-[var(--btn-primary)] px-4 py-3 font-sans text-sm font-extrabold text-[var(--btn-text)] shadow-sm transition hover:brightness-95 active:scale-95"
+      >
+        {copy.cta}
+      </Link>
+    </section>
+  );
+}
+
+function RankMedal({ rank }: { rank: number }) {
+  if (rank === 1) {
+    return <Trophy className="size-4 text-[var(--btn-primary)]" aria-label="#1" />;
+  }
+  if (rank === 2) {
+    return <Medal className="size-4 text-[var(--text-headline)]" aria-label="#2" />;
+  }
+  if (rank === 3) {
+    return <Award className="size-4 text-[var(--accent)]" aria-label="#3" />;
+  }
+  return <span>#{rank}</span>;
 }
 
 function GoogleMark() {

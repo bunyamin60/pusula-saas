@@ -7,9 +7,10 @@ export function catalogGameEnabled(
 ): boolean {
   if (id === "draw") return arcadeGameEnabled(games, "draw");
   if (id === "quiz") return arcadeGameEnabled(games, "trivia");
-  if (id === "trivia") return arcadeGameEnabled(games, "pop_trivia");
-  if (id === "swipe") return arcadeGameEnabled(games, "reflex");
+  if (id === "taboo") return arcadeGameEnabled(games, "taboo");
+  if (id === "whoami") return arcadeGameEnabled(games, "whoami");
+  if (id === "blockblast") return arcadeGameEnabled(games, "blockblast");
   if (id === "talk") return arcadeGameEnabled(games, "icebreaker");
   if (id === "bill") return arcadeGameEnabled(games, "wheel");
-  return games[id] !== false;
+  return false;
 }

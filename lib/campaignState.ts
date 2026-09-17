@@ -209,20 +209,18 @@ export function parseEnabledGames(raw: unknown, fallback = defaultEnabledGames()
     mapped ? "trivia" : "quiz",
     fallback.quiz,
   );
-  const trivia = storedBool(
-    stored,
-    mapped ? "pop_trivia" : "trivia",
-    fallback.trivia,
-  );
   return {
-    trivia,
-    emoji: storedBool(stored, "emoji", fallback.emoji),
-    swipe: storedBool(stored, mapped ? "reflex" : "swipe", fallback.swipe !== false),
+    trivia: false,
+    emoji: false,
+    swipe: false,
     number: storedBool(stored, "number", fallback.number),
     quiz,
     draw: storedBool(stored, "draw", fallback.draw !== false),
     talk: storedBool(stored, mapped ? "icebreaker" : "talk", fallback.talk !== false),
     bill: storedBool(stored, mapped ? "wheel" : "bill", fallback.bill !== false),
+    taboo: storedBool(stored, "taboo", fallback.taboo !== false),
+    whoami: storedBool(stored, "whoami", fallback.whoami !== false),
+    blockblast: storedBool(stored, "blockblast", fallback.blockblast !== false),
     pusulaFunnel: storedBool(stored, "pusula_funnel", fallback.pusulaFunnel !== false),
   };
 }
@@ -231,14 +229,17 @@ export function serializeActiveGames(games: EnabledGames): Record<string, boolea
   return {
     draw: games.draw !== false,
     trivia: games.quiz !== false,
-    pop_trivia: games.trivia !== false,
-    emoji: games.emoji !== false,
-    reflex: games.swipe !== false,
+    pop_trivia: false,
+    emoji: false,
+    reflex: false,
     icebreaker: games.talk !== false,
     wheel: games.bill !== false,
+    taboo: games.taboo !== false,
+    whoami: games.whoami !== false,
+    blockblast: games.blockblast !== false,
     pusula_funnel: games.pusulaFunnel !== false,
     quiz: games.quiz !== false,
-    swipe: games.swipe !== false,
+    swipe: false,
     talk: games.talk !== false,
     bill: games.bill !== false,
     number: games.number !== false,

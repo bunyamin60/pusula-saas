@@ -47,9 +47,9 @@ type DeskTab = "kasa" | "venue" | "gossip" | "metrics";
 const DESK_GAMES: CatalogGameId[] = [
   "draw",
   "quiz",
-  "trivia",
-  "emoji",
-  "swipe",
+  "taboo",
+  "whoami",
+  "blockblast",
   "talk",
   "bill",
 ];
@@ -409,13 +409,13 @@ function VenueTab() {
                       : "border-[var(--text-headline)]/10"
                   }`}
                 >
-                  <span className="flex h-10 overflow-hidden rounded-xl border border-[var(--text-headline)]/10">
+                  <span className="flex h-10 overflow-hidden rounded-xl border border-[var(--card-border)]">
                     <span
                       className="flex-1"
                       style={{ backgroundColor: preset.tokens.background }}
                     />
                     <span
-                      className="w-10"
+                      className="flex-1"
                       style={{ backgroundColor: preset.tokens.primary }}
                     />
                     <span
@@ -701,11 +701,13 @@ function GossipTab({ tenantId }: { tenantId: string }) {
   const [publishing, setPublishing] = useState(false);
   const [hidingId, setHidingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<"published" | "publishError" | "offline" | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
 
   async function refresh() {
     const nextQuestion = await fetchActiveQuestion(tenantId);
     setQuestion(nextQuestion);
     const nextAnswers = await fetchDailyAnswers(tenantId, {
+      questionId: nextQuestion?.id,
       includeHidden: false,
       limit: 20,
     });
@@ -742,15 +744,17 @@ function GossipTab({ tenantId }: { tenantId: string }) {
   async function publish() {
     setPublishing(true);
     setNotice(null);
-    const next = await publishDailyQuestion(tenantId, prompt);
+    setErrorDetail(null);
+    const result = await publishDailyQuestion(tenantId, prompt);
     setPublishing(false);
-    if (!next) {
+    if (!result.ok) {
+      console.error("Yayınlama hatası:", result.error);
       setNotice("publishError");
+      setErrorDetail(result.error);
       return;
     }
-    setQuestion(next);
     setPrompt("");
-    setAnswers([]);
+    await refresh();
     setNotice("published");
   }
 
@@ -798,11 +802,16 @@ function GossipTab({ tenantId }: { tenantId: string }) {
           {publishing ? copy.publishing : copy.publish}
         </button>
         {notice === "published" ? (
-          <p className="mt-2 text-sm font-semibold text-emerald-600">{copy.published}</p>
+          <p className="mt-2 rounded-2xl bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-600">
+            {copy.published}
+          </p>
         ) : null}
         {notice === "publishError" || notice === "offline" ? (
           <p className="mt-2 text-sm text-red-600">
             {notice === "offline" ? copy.offline : copy.publishError}
+            {errorDetail ? (
+              <span className="mt-1 block text-xs font-medium leading-relaxed">{errorDetail}</span>
+            ) : null}
           </p>
         ) : null}
       </section>

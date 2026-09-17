@@ -137,7 +137,7 @@ export function TalkDeck({
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden overscroll-none">
       <div className="flex shrink-0 items-center justify-end gap-3">
-        <p className="font-sans text-xs font-medium text-[#2d334a]">{progress}</p>
+        <p className="text-xs font-bold text-[var(--text-body)]">{progress}</p>
       </div>
       {showModes ? (
         <div className="mt-3 grid grid-cols-3 gap-1.5">
@@ -149,10 +149,10 @@ export function TalkDeck({
                 key={item.id}
                 type="button"
                 onClick={() => onChooseCategory?.(item.id)}
-                className={`rounded-xl px-1.5 py-2 text-center font-sans text-[11px] leading-tight tracking-wide transition-colors select-none active:scale-95 ${
+                className={`min-h-12 rounded-xl px-1.5 py-2 text-center font-sans text-[11px] leading-tight tracking-wide transition-colors select-none active:scale-95 ${
                   active
-                    ? "bg-[#272343] font-bold text-white"
-                    : "bg-slate-100 font-semibold text-slate-600"
+                    ? "bg-[var(--btn-primary)] font-extrabold text-[var(--btn-text)] shadow-sm"
+                    : "bg-white/10 font-semibold text-[var(--text-headline)]/80 hover:bg-white/15"
                 }`}
               >
                 {label}
@@ -161,7 +161,7 @@ export function TalkDeck({
           })}
         </div>
       ) : (
-        <p className="mt-1 font-sans text-[11px] font-semibold uppercase tracking-[0.22em] text-[#2d334a]">
+        <p className="mt-1 font-sans text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--text-body)]">
           {tabLabels[category.id] ?? category.title}
         </p>
       )}
@@ -314,18 +314,18 @@ function WriteFace({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
-      <p className="font-sans text-[1.45rem] font-extrabold leading-snug tracking-tight text-[#272343]">
+      <p className="font-sans text-xl font-black leading-snug text-[var(--text-headline)]">
         {prompt.text}
       </p>
-      <p className="mt-2 font-sans text-xs font-medium leading-relaxed text-[#2d334a]">{copy.writeHint}</p>
+      <p className="mt-2 text-xs font-medium text-[var(--text-body)] opacity-90">{copy.writeHint}</p>
       {locked ? (
-        <div className="mt-4 rounded-2xl border border-[#272343]/15 bg-[#bae8e8] px-4 py-3">
-          <p className="font-sans text-sm font-medium leading-relaxed text-[#272343]">{value}</p>
-          <p className="mt-2 font-sans text-xs font-medium text-[#2d334a]">{copy.writeSaved}</p>
+        <div className="mt-4 rounded-2xl border-2 border-[var(--border)] bg-black/25 px-4 py-3">
+          <p className="font-sans text-sm font-medium leading-relaxed text-[var(--text-headline)]">{value}</p>
+          <p className="mt-2 text-xs font-medium text-[var(--text-body)] opacity-90">{copy.writeSaved}</p>
           <button
             type="button"
             onClick={() => setLocked(false)}
-            className="mt-2 rounded-full bg-[#fffffe] px-3 py-1 font-sans text-xs font-bold text-[#272343]"
+            className="mt-2 rounded-full bg-[var(--btn-primary)] px-3 py-1 font-sans text-xs font-bold text-[var(--btn-text)]"
           >
             {copy.writeEdit}
           </button>
@@ -337,7 +337,7 @@ function WriteFace({
             onChange={(event) => setDraft(event.target.value)}
             placeholder={copy.writePlaceholder}
             rows={4}
-            className="field-input mt-4 min-h-[7.5rem] resize-none text-base"
+            className="mt-4 min-h-[7.5rem] resize-none rounded-2xl border-2 border-[var(--border)] bg-black/25 p-4 text-[var(--text-headline)] outline-none placeholder:text-[var(--text-body)]/50 focus:border-[var(--btn-primary)]"
           />
           <button
             type="button"
@@ -365,10 +365,10 @@ function FlagFace({
   const copy = tenantConfig.copy.talk;
   return (
     <div className="relative z-[15] flex h-full flex-col pt-6">
-      <p className="font-sans text-[1.55rem] font-extrabold leading-snug tracking-tight text-[#272343]">
+      <p className="font-sans text-xl font-black leading-snug text-[var(--text-headline)]">
         {prompt.text}
       </p>
-      <p className="mt-3 font-sans text-xs font-medium leading-relaxed text-[#2d334a]">{copy.flagHint}</p>
+      <p className="mt-3 text-xs font-medium text-[var(--text-body)] opacity-90">{copy.flagHint}</p>
       {vote ? (
         <p
           className="mt-auto text-center text-sm font-semibold"
@@ -382,7 +382,7 @@ function FlagFace({
           {vote === "red" ? copy.flagLeft : copy.flagRight}
         </p>
       ) : (
-        <p className="mt-auto text-center font-sans text-xs font-medium tracking-wide text-[#2d334a]">
+        <p className="mt-auto text-center text-xs font-medium tracking-wide text-[var(--text-body)] opacity-90">
           {copy.flagHint}
         </p>
       )}
@@ -400,13 +400,13 @@ function SurpriseFace({
   const copy = tenantConfig.copy.talk;
   return (
     <div className="flex h-full flex-col">
-      <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.22em] text-[#2d334a]">
+      <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--text-body)]">
         {copy.surpriseEyebrow}
       </p>
-      <h3 className="mt-3 font-sans text-[1.65rem] font-extrabold leading-tight tracking-tight text-[#272343]">
+      <h3 className="mt-3 font-sans text-xl font-black leading-snug text-[var(--text-headline)]">
         {copy.surpriseTitle}
       </h3>
-      <p className="mt-3 font-sans text-[15px] font-medium leading-relaxed text-[#2d334a]">{copy.surpriseBody}</p>
+      <p className="mt-3 text-xs font-medium leading-relaxed text-[var(--text-body)] opacity-90">{copy.surpriseBody}</p>
       <div className="mt-auto space-y-2 pt-8">
         <button type="button" onClick={onClaim} className="btn-primary min-h-14 w-full">
           {copy.surpriseCta}
@@ -438,20 +438,20 @@ function EndFace({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
-      <h3 className="font-sans text-[1.55rem] font-extrabold leading-tight tracking-tight text-[#272343]">
+      <h3 className="font-sans text-xl font-black leading-snug text-[var(--text-headline)]">
         {copy.compareTitle}
       </h3>
-      <p className="mt-2 font-sans text-sm font-medium leading-relaxed text-[#2d334a]">{copy.compareLead}</p>
+      <p className="mt-2 text-xs font-medium leading-relaxed text-[var(--text-body)] opacity-90">{copy.compareLead}</p>
 
       {writes.length ? (
         <div className="mt-4 space-y-2">
-          <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.16em] text-[#2d334a]">
+          <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-body)]">
             {copy.compareWrites}
           </p>
           {writes.map((prompt) => (
-            <div key={prompt.id} className="rounded-2xl border border-[#272343]/15 bg-[#bae8e8] px-3 py-3">
-              <p className="font-sans text-xs font-medium text-[#2d334a]">{prompt.text}</p>
-              <p className="mt-1 font-sans text-sm font-medium text-[#272343]">
+            <div key={prompt.id} className="rounded-2xl border-2 border-[var(--border)] bg-black/25 px-3 py-3">
+              <p className="text-xs font-medium text-[var(--text-body)] opacity-90">{prompt.text}</p>
+              <p className="mt-1 font-sans text-sm font-medium text-[var(--text-headline)]">
                 {answers[prompt.id]?.trim() || copy.emptyAnswer}
               </p>
             </div>
@@ -461,14 +461,14 @@ function EndFace({
 
       {flags.length ? (
         <div className="mt-4 space-y-2">
-          <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.16em] text-[#2d334a]">
+          <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-body)]">
             {copy.compareFlags}
           </p>
           {flags.map((prompt) => {
             const vote = votes[prompt.id];
             return (
-              <div key={prompt.id} className="flex items-start justify-between gap-3 rounded-2xl border border-[#272343]/15 bg-[#bae8e8] px-3 py-3">
-                <p className="font-sans text-sm font-medium text-[#272343]">{prompt.text}</p>
+              <div key={prompt.id} className="flex items-start justify-between gap-3 rounded-2xl border-2 border-[var(--border)] bg-black/25 px-3 py-3">
+                <p className="font-sans text-sm font-medium text-[var(--text-headline)]">{prompt.text}</p>
                 <span
                   className="shrink-0 text-xs font-bold"
                   style={{
@@ -492,7 +492,7 @@ function EndFace({
         </div>
       ) : null}
 
-      <p className="mt-4 font-sans text-sm font-medium text-[#2d334a]">{copy.endBody}</p>
+      <p className="mt-4 text-xs font-medium text-[var(--text-body)] opacity-90">{copy.endBody}</p>
       <div className="mt-auto space-y-2 pt-6">
         <button type="button" onClick={onAgain} className="btn-primary min-h-14 w-full">
           {copy.again}

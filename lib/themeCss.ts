@@ -2,6 +2,9 @@ import { tenantConfig, type ThemeTokens } from "@/config/tenant.config";
 import { isDarkHex } from "@/lib/tenant";
 
 function tabActivePair(theme: ThemeTokens): { bg: string; text: string } {
+  if (isDarkHex(theme.background)) {
+    return { bg: theme.primary, text: theme.onPrimary };
+  }
   const bg = isDarkHex(theme.textDark) ? theme.textDark : "#0d0d0d";
   return { bg, text: "#ffffff" };
 }
@@ -27,8 +30,14 @@ export function themeVarEntries(
     ["--btn-text", theme.onPrimary],
     ["--card-surface", theme.surface],
     [
+      "--border",
+      theme.border ??
+        `color-mix(in srgb, ${theme.textDark} 20%, transparent)`,
+    ],
+    [
       "--card-border",
-      `color-mix(in srgb, ${theme.textDark} 20%, transparent)`,
+      theme.border ??
+        `color-mix(in srgb, ${theme.textDark} 20%, transparent)`,
     ],
     ["--tab-active-bg", tabActivePair(theme).bg],
     ["--tab-active-text", tabActivePair(theme).text],
@@ -42,12 +51,14 @@ export function themeVars(theme: ThemeTokens = tenantConfig.theme): string {
 }
 
 export function buildThemeCss(theme: ThemeTokens = tenantConfig.theme): string {
-  return `:root { ${themeVars(theme)} }`;
+  const scheme = isDarkHex(theme.background) ? "dark" : "light";
+  return `:root { color-scheme: ${scheme}; ${themeVars(theme)} }`;
 }
 
 export function applyThemeTokens(theme: ThemeTokens): void {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
+  root.style.colorScheme = isDarkHex(theme.background) ? "dark" : "light";
   themeVarEntries(theme).forEach(([key, value]) => {
     root.style.setProperty(key, value);
   });

@@ -195,8 +195,7 @@ export function normalizeGuess(value: string): string {
     .replace(/ı/g, "i")
     .replace(/ö/g, "o")
     .replace(/ç/g, "c")
-    .replace(/[^a-z0-9]+/g, "")
-    .replace(/(.)\1+/g, "$1");
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 function levenshtein(a: string, b: string): number {
@@ -220,14 +219,25 @@ function levenshtein(a: string, b: string): number {
   return grid[a.length][b.length];
 }
 
-export function isFuzzyMatch(guess: string, word: string): boolean {
+export type DrawGuessVerdict = "correct" | "close" | "miss";
+
+export function allowedDrawDistance(word: string): number {
+  return normalizeGuess(word).length <= 5 ? 0 : 1;
+}
+
+export function scoreDrawGuess(guess: string, word: string): DrawGuessVerdict {
   const left = normalizeGuess(guess);
   const right = normalizeGuess(word);
-  if (!left || !right) return false;
-  if (left === right) return true;
+  if (!left || !right) return "miss";
+  if (left === right) return "correct";
   const distance = levenshtein(left, right);
-  const max = right.length <= 5 ? 1 : 2;
-  return distance <= max;
+  if (distance <= allowedDrawDistance(word)) return "correct";
+  if (distance === 2) return "close";
+  return "miss";
+}
+
+export function isFuzzyMatch(guess: string, word: string): boolean {
+  return scoreDrawGuess(guess, word) === "correct";
 }
 
 export function withOccupantScores(
