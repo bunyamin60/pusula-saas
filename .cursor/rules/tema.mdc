@@ -1,0 +1,9 @@
+---
+description: Dinamik tema ve stil kuralları
+globs: *
+alwaysApply: true
+---
+- Asla statik/hardcoded renk (örneğin bg-blue-500, text-red-600, inline style #hex) kullanma.
+- Tüm renkleri ve arayüz elemanlarını projedeki dinamik tema değişkenlerinden (CSS variables) ve ortak UI bileşenlerinden al.
+- Admin panelinden seçilen tenant temasının ezilmesine kesinlikle izin verme.
+- Kök dizindeki .cursorrules dosyasındaki mimari standartlara sadık kal.
