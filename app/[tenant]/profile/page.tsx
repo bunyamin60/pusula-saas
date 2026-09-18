@@ -169,7 +169,7 @@ function ProfileCard() {
             {copy.profileDeleteCancel}
           </button>
         </div>
-      ) : (
+      ) : profile ? (
         <button
           type="button"
           onClick={() => setIsConfirming(true)}
@@ -177,7 +177,7 @@ function ProfileCard() {
         >
           {copy.profileDelete}
         </button>
-      )}
+      ) : null}
 
       {toast ? (
         <p

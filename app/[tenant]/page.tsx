@@ -51,10 +51,6 @@ export default function TenantHome() {
   }
 
   function backWelcome() {
-    if (historyView(window.history.state) === "lobby") {
-      window.history.back();
-      return;
-    }
     writeVenueHomeView(tenantId, "welcome");
     window.history.replaceState({ venueHome: "welcome" }, "");
     setView("welcome");

@@ -1,13 +1,3 @@
-import type { LucideIcon } from "lucide-react";
-import {
-  Dices,
-  HelpCircle,
-  LayoutGrid,
-  MessageCircleHeart,
-  Palette,
-  Speech,
-  Trophy,
-} from "lucide-react";
 import { tenantConfig, type EnabledGames } from "@/config/tenant.config";
 
 export type ArcadeFilter = "all" | "cafe" | "duel" | "together";
@@ -23,10 +13,9 @@ export type ArcadeGameId =
 export type ArcadeGame = {
   id: ArcadeGameId;
   filter: Exclude<ArcadeFilter, "all">;
-  gradient: string;
-  image: string;
-  icon: LucideIcon;
   path: string;
+  /** Full-bleed lobby cover under /public */
+  coverImage: string;
 };
 
 export type ArcadeLobbyKind = "duel" | "table" | "party";
@@ -45,58 +34,44 @@ export const GAME_CATALOG: readonly ArcadeGame[] = [
   {
     id: "draw",
     filter: "cafe",
-    gradient: "from-rose-500 to-red-600",
-    image: "/games/draw.png",
-    icon: Palette,
     path: "/draw",
+    coverImage: "/games/images/cizbil.webp",
   },
   {
     id: "trivia",
     filter: "cafe",
-    gradient: "from-blue-700 to-indigo-900",
-    image: "/games/trivia.png",
-    icon: Trophy,
     path: "/trivia",
+    coverImage: "/games/images/bilgiyarismasi.webp",
   },
   {
     id: "blockblast",
     filter: "cafe",
-    gradient: "from-fuchsia-500 to-orange-500",
-    image: "/games/numbers.png",
-    icon: LayoutGrid,
     path: "/blockblast",
+    coverImage: "/games/images/blockblast.webp",
   },
   {
     id: "taboo",
     filter: "together",
-    gradient: "from-amber-400 to-yellow-600",
-    image: "/games/clapper.png",
-    icon: Speech,
     path: "/taboo",
+    coverImage: "/games/images/tabu.webp",
   },
   {
     id: "whoami",
     filter: "together",
-    gradient: "from-sky-500 to-cyan-700",
-    image: "/games/guess.png",
-    icon: HelpCircle,
     path: "/whoami",
+    coverImage: "/games/images/benkimim.webp",
   },
   {
     id: "icebreaker",
     filter: "together",
-    gradient: "from-violet-600 to-purple-800",
-    image: "/games/icebreaker.png",
-    icon: MessageCircleHeart,
     path: "/icebreaker",
+    coverImage: "/games/images/sohbetkartlari.webp",
   },
   {
     id: "wheel",
     filter: "together",
-    gradient: "from-orange-500 to-amber-600",
-    image: "/games/wheel.png",
-    icon: Dices,
     path: "/wheel",
+    coverImage: "/games/images/hesapkimde.webp",
   },
 ];
 

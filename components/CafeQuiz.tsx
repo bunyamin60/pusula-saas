@@ -147,7 +147,7 @@ function QuizRound({
   const urgent = remaining < 4000 && !locked;
 
   return (
-    <div className="flex h-full min-h-0 max-h-full flex-1 flex-col justify-between overflow-hidden">
+    <div className="flex h-full min-h-0 max-h-full w-full min-w-0 flex-1 flex-col justify-between overflow-x-hidden overflow-hidden">
       <div className="shrink-0">
         <div className="flex items-center justify-between font-sans text-xs font-medium uppercase tracking-[0.1em] text-[var(--text-body)]">
           <span>
@@ -167,13 +167,13 @@ function QuizRound({
         </div>
       </div>
 
-      <div className="mt-3 min-h-0 shrink rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] p-3.5 text-center shadow-sm">
+      <div className="mt-3 min-h-0 min-w-0 shrink rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] p-3.5 text-center shadow-sm">
         <h2 className="font-sans text-lg font-extrabold leading-snug tracking-tight text-[var(--text-headline)]">
           {prompt}
         </h2>
       </div>
 
-      <div className="mt-3 grid shrink-0 gap-2">
+      <div className="mt-3 grid min-w-0 shrink-0 gap-2 overflow-x-hidden">
         {options.map((option, index) => {
           const chosen = selected === index;
           const isCorrect = locked && index === answer;
@@ -186,11 +186,11 @@ function QuizRound({
               type="button"
               disabled={locked}
               onClick={() => choose(index)}
-              className={`flex min-h-[48px] items-center gap-3 rounded-2xl border-2 px-3.5 py-2.5 text-left font-sans text-sm font-bold transition-all active:scale-95 ${
+              className={`flex min-h-[48px] w-full min-w-0 max-w-full items-center gap-3 overflow-hidden rounded-2xl border-2 px-3.5 py-2.5 text-left font-sans text-sm font-bold transition-colors active:scale-[0.98] ${
                 isCorrect
-                  ? "quiz-flash-ok scale-[1.01] border-[var(--quiz-ok-border)] bg-[var(--quiz-ok)] text-[var(--quiz-on-feedback)] shadow-md"
+                  ? "quiz-flash-ok border-[var(--quiz-ok-border)] bg-[var(--quiz-ok)] text-[var(--quiz-on-feedback)]"
                   : isWrong
-                    ? "quiz-flash-bad border-[var(--quiz-bad-border)] bg-[var(--quiz-bad)] text-[var(--quiz-on-feedback)] shadow-md"
+                    ? "quiz-flash-bad border-[var(--quiz-bad-border)] bg-[var(--quiz-bad)] text-[var(--quiz-on-feedback)]"
                     : idleLocked
                       ? "border-[color-mix(in_srgb,var(--border)_60%,transparent)] bg-[var(--card-surface)] text-[var(--text-headline)] opacity-50"
                       : "border-[color-mix(in_srgb,var(--border)_60%,transparent)] bg-[var(--card-surface)] text-[var(--text-headline)] hover:bg-[var(--card-surface)]/80"
@@ -205,7 +205,7 @@ function QuizRound({
               >
                 {letter}
               </span>
-              <span className="min-w-0 flex-1 leading-snug">{option}</span>
+              <span className="min-w-0 flex-1 break-words leading-snug">{option}</span>
             </button>
           );
         })}
@@ -215,7 +215,7 @@ function QuizRound({
         type="button"
         disabled={!locked}
         onClick={onAdvance}
-        className={`mt-auto min-h-[48px] w-full rounded-2xl bg-[var(--btn-primary)] py-3 font-sans text-base font-extrabold text-[var(--btn-text)] shadow-md transition-all ${
+        className={`mt-auto min-h-[48px] w-full shrink-0 rounded-2xl bg-[var(--btn-primary)] py-3 font-sans text-base font-extrabold text-[var(--btn-text)] shadow-md transition-all ${
           locked
             ? "hover:brightness-95 active:scale-95 active:brightness-95"
             : "cursor-not-allowed opacity-50"

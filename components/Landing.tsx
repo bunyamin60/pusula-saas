@@ -120,8 +120,8 @@ function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
   ];
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pb-2">
-      <header className="sticky top-0 z-10 flex w-full items-center justify-between gap-3 bg-background py-2">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <header className="flex w-full shrink-0 items-center justify-between gap-3 bg-[var(--bg-canvas)] px-5 pb-2 pt-1">
         <button
           type="button"
           onClick={onBackWelcome}
@@ -133,76 +133,78 @@ function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
         <BrandLogo src={logoUrl} alt={brand} size="header" />
       </header>
 
-      <RewardProgressBar compact />
+      <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-5 pb-2">
+        <RewardProgressBar compact />
 
-      <div className="rounded-full border border-[var(--border)] bg-[var(--card-surface)] p-1">
-        <div className="grid grid-cols-3 gap-1">
-          {tabs.map(([id, label]) => {
-            const active = tab === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setTab(id)}
-                className={`min-h-12 rounded-full px-2 py-2 font-sans text-[12px] tracking-wide transition-colors ${
-                  active
-                    ? "bg-[var(--tab-active-bg)] font-extrabold text-[var(--tab-active-text)] shadow-sm"
-                    : "font-medium text-[var(--text-body)]"
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
+        <div className="rounded-full border border-[var(--border)] bg-[var(--card-surface)] p-1">
+          <div className="grid grid-cols-3 gap-1">
+            {tabs.map(([id, label]) => {
+              const active = tab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setTab(id)}
+                  className={`min-h-12 rounded-full px-2 py-2 font-sans text-[12px] tracking-wide transition-colors ${
+                    active
+                      ? "bg-[var(--tab-active-bg)] font-extrabold text-[var(--tab-active-text)] shadow-sm"
+                      : "font-medium text-[var(--text-body)]"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
 
-      {tab === "games" ? (
-        <div className="mt-1 grid grid-cols-2 gap-3 pb-3 pt-2">
-          {visible.map((game) => {
-            const { title, badge, caption } = arcadeGameCopy(game.id);
-            return (
-              <ArcadeGameCard
-                key={game.id}
-                game={game}
-                title={title}
-                badge={badge}
-                caption={caption}
-                onClick={() => router.push(`/${tenantId}${game.path}`)}
-              />
-            );
-          })}
-        </div>
-      ) : tab === "events" ? (
-        <div className="mt-3 space-y-4">
-          <LoyaltyStampCard
-            tenantId={tenantId}
-            clientId={player.clientId}
-            tableId={tenantConfig.brand.tableName}
-          />
-          <DailyQuestionFeed tenantId={tenantId} clientId={player.clientId} />
-          <EventsRaceCard
-            tenantId={tenantId}
-            gameType="quiz"
-            href={`/${tenantId}/trivia`}
-            copy={copy.race}
-          />
-          <EventsRaceCard
-            tenantId={tenantId}
-            gameType="blockblast"
-            href={`/${tenantId}/blockblast`}
-            copy={copy.blastRace}
-            medals
-          />
-        </div>
-      ) : (
-        <p className="mt-8 text-center font-sans text-sm font-medium text-[var(--text-body)]">
-          {copy.surveysEmpty}
-        </p>
-      )}
+        {tab === "games" ? (
+          <div className="mt-1 grid grid-cols-2 gap-3 pb-3 pt-2">
+            {visible.map((game) => {
+              const { title, badge, caption } = arcadeGameCopy(game.id);
+              return (
+                <ArcadeGameCard
+                  key={game.id}
+                  game={game}
+                  title={title}
+                  badge={badge}
+                  caption={caption}
+                  onClick={() => router.push(`/${tenantId}${game.path}`)}
+                />
+              );
+            })}
+          </div>
+        ) : tab === "events" ? (
+          <div className="mt-3 space-y-4">
+            <LoyaltyStampCard
+              tenantId={tenantId}
+              clientId={player.clientId}
+              tableId={tenantConfig.brand.tableName}
+            />
+            <DailyQuestionFeed tenantId={tenantId} clientId={player.clientId} />
+            <EventsRaceCard
+              tenantId={tenantId}
+              gameType="quiz"
+              href={`/${tenantId}/trivia`}
+              copy={copy.race}
+            />
+            <EventsRaceCard
+              tenantId={tenantId}
+              gameType="blockblast"
+              href={`/${tenantId}/blockblast`}
+              copy={copy.blastRace}
+              medals
+            />
+          </div>
+        ) : (
+          <p className="mt-8 text-center font-sans text-sm font-medium text-[var(--text-body)]">
+            {copy.surveysEmpty}
+          </p>
+        )}
 
-      <div className="mt-2">
-        <DeviceTestReset />
+        <div className="mt-2">
+          <DeviceTestReset />
+        </div>
       </div>
     </section>
   );

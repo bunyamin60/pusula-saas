@@ -1,4 +1,5 @@
 import { tenantConfig } from "@/config/tenant.config";
+import { readCustomerProfile } from "@/lib/customerProfile";
 import { registerRewardCoupon } from "@/lib/rewardCoupons";
 import { getSupabase } from "@/lib/supabase";
 
@@ -121,6 +122,7 @@ async function persistRemote(
   try {
     const supabase = getSupabase();
     if (!supabase || !tenantId || !clientId) return;
+    const profile = readCustomerProfile();
     await supabase.from("customers").upsert(
       {
         tenant_id: tenantId,
@@ -128,6 +130,7 @@ async function persistRemote(
         stamp_count: count,
         last_coupon_code: lastCode,
         updated_at: new Date().toISOString(),
+        ...(profile?.name ? { nickname: profile.name } : {}),
       },
       { onConflict: "tenant_id,client_id" },
     );

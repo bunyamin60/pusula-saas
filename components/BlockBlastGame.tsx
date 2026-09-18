@@ -33,8 +33,34 @@ import { confirmStampVisit } from "@/lib/stampCard";
 const FINGER_LIFT = 50;
 const CLEAR_MS = 300;
 const FLOAT_MS = 700;
-const TRAY_CELL = 28;
+const BOARD_MAX_PX = 340;
 const SPARK_COUNT = 4;
+const TRAY_GRID = 5;
+/** Fixed tray preview cell — never flex-stretched (Tailwind size-4 = 16px). */
+const TRAY_PREVIEW_CELL_PX = 16;
+const TRAY_PREVIEW_GAP_PX = 4;
+
+type CellMetrics = {
+  size: number;
+  colStride: number;
+  rowStride: number;
+  left: number;
+  top: number;
+  gap: number;
+};
+
+const DEFAULT_CELL: CellMetrics = {
+  size: 36,
+  colStride: 40,
+  rowStride: 40,
+  left: 0,
+  top: 0,
+  gap: 4,
+};
+
+function pieceGap(cell: number): number {
+  return Math.max(2, Math.round(cell * 0.08));
+}
 
 type TraySlot = BlockShape | null;
 
@@ -232,10 +258,12 @@ export function BlockBlastGame({
   const [floats, setFloats] = useState<FloatText[]>([]);
   const [sparks, setSparks] = useState<Spark[]>([]);
   const [impact, setImpact] = useState<"pop" | "shake" | null>(null);
-  const [cell, setCell] = useState({ size: 36, stride: 40, left: 0, top: 0 });
+  const [cell, setCell] = useState<CellMetrics>(DEFAULT_CELL);
   const cellRef = useRef(cell);
   cellRef.current = cell;
   const boardRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [boardPx, setBoardPx] = useState(280);
   const sessionRef = useRef<BlastSession | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const busyRef = useRef(false);
@@ -263,16 +291,32 @@ export function BlockBlastGame({
 
   const measure = useCallback(() => {
     const origin = boardRef.current?.querySelector<HTMLElement>("[data-cell='0-0']");
-    const next = boardRef.current?.querySelector<HTMLElement>("[data-cell='0-1']");
+    const right = boardRef.current?.querySelector<HTMLElement>("[data-cell='0-1']");
+    const below = boardRef.current?.querySelector<HTMLElement>("[data-cell='1-0']");
     if (!origin) return;
     const a = origin.getBoundingClientRect();
-    const b = next?.getBoundingClientRect();
-    setCell({
+    const b = right?.getBoundingClientRect();
+    const c = below?.getBoundingClientRect();
+    const next: CellMetrics = {
       size: a.width,
-      stride: b ? b.left - a.left : a.width + 4,
+      colStride: b ? b.left - a.left : a.width,
+      rowStride: c ? c.top - a.top : a.height,
       left: a.left,
       top: a.top,
-    });
+      gap: b ? Math.max(0, b.left - a.right) : 0,
+    };
+    cellRef.current = next;
+    setCell(next);
+  }, []);
+
+  const measureStage = useCallback(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const rect = stage.getBoundingClientRect();
+    const side = Math.floor(
+      Math.max(160, Math.min(rect.width, rect.height, BOARD_MAX_PX)),
+    );
+    setBoardPx(side);
   }, []);
 
   useEffect(() => {
@@ -282,6 +326,22 @@ export function BlockBlastGame({
     claimedRef.current = next.claimed;
     savedOverRef.current = next.over;
   }, [tenantId]);
+
+  useEffect(() => {
+    measureStage();
+    const stage = stageRef.current;
+    if (!stage) return;
+    const observer = new ResizeObserver(() => {
+      measureStage();
+      requestAnimationFrame(measure);
+    });
+    observer.observe(stage);
+    window.addEventListener("resize", measureStage);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measureStage);
+    };
+  }, [measure, measureStage, session?.over]);
 
   useEffect(() => {
     measure();
@@ -294,7 +354,7 @@ export function BlockBlastGame({
       observer.disconnect();
       window.removeEventListener("scroll", measure, true);
     };
-  }, [measure, session?.over]);
+  }, [measure, boardPx, session?.over]);
 
   useEffect(() => {
     const root = trayRef.current;
@@ -405,22 +465,27 @@ export function BlockBlastGame({
     });
   }, [player.avatar, player.clientId, session, tenantId]);
 
-  function readCellMetrics() {
+  function readCellMetrics(): CellMetrics {
     const origin = boardRef.current?.querySelector<HTMLElement>("[data-cell='0-0']");
-    const next = boardRef.current?.querySelector<HTMLElement>("[data-cell='0-1']");
+    const right = boardRef.current?.querySelector<HTMLElement>("[data-cell='0-1']");
+    const below = boardRef.current?.querySelector<HTMLElement>("[data-cell='1-0']");
     if (!origin) return cellRef.current;
     const a = origin.getBoundingClientRect();
-    const b = next?.getBoundingClientRect();
-    const metrics = {
+    const b = right?.getBoundingClientRect();
+    const c = below?.getBoundingClientRect();
+    const metrics: CellMetrics = {
       size: a.width,
-      stride: b ? b.left - a.left : a.width + 4,
+      colStride: b ? b.left - a.left : a.width,
+      rowStride: c ? c.top - a.top : a.height,
       left: a.left,
       top: a.top,
+      gap: b ? Math.max(0, b.left - a.right) : 0,
     };
     cellRef.current = metrics;
     return metrics;
   }
 
+  /** Map floating piece top-left (after finger lift) onto board cell origin. */
   function originFromPoint(
     clientX: number,
     clientY: number,
@@ -428,10 +493,11 @@ export function BlockBlastGame({
     grabY: number,
   ) {
     const metrics = readCellMetrics();
-    const left = clientX - grabX;
-    const top = clientY - grabY - FINGER_LIFT;
-    const col = Math.round((left - metrics.left) / metrics.stride);
-    const row = Math.round((top - metrics.top) / metrics.stride);
+    // Ghost is drawn at (clientX - grabX, clientY - grabY - FINGER_LIFT).
+    const pieceLeft = clientX - grabX;
+    const pieceTop = clientY - grabY - FINGER_LIFT;
+    const col = Math.round((pieceLeft - metrics.left) / metrics.colStride);
+    const row = Math.round((pieceTop - metrics.top) / metrics.rowStride);
     return { row, col };
   }
 
@@ -553,8 +619,9 @@ export function BlockBlastGame({
     }
     const metrics = readCellMetrics();
     const box = boundingBox(shape.cells);
-    const grabX = (box.cols * metrics.size) / 2;
-    const grabY = (box.rows * metrics.size) / 2;
+    const gap = pieceGap(metrics.size);
+    const grabX = (box.cols * metrics.size + Math.max(0, box.cols - 1) * gap) / 2;
+    const grabY = (box.rows * metrics.size + Math.max(0, box.rows - 1) * gap) / 2;
     const snapped = previewOrigin(
       event.clientX,
       event.clientY,
@@ -678,122 +745,131 @@ export function BlockBlastGame({
 
   return (
     <section
-      className={`relative flex min-h-0 flex-1 flex-col select-none ${
+      className={`relative flex h-full max-h-full min-h-0 flex-1 flex-col justify-between overflow-hidden p-2 select-none sm:p-3 ${
         drag ? "touch-none" : ""
       }`}
     >
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-3 py-2 shadow-sm">
-            <p className="font-sans text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-body)]">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="grid shrink-0 grid-cols-2 gap-2">
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] p-2 shadow-sm">
+            <p className="font-sans text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-body)]">
               {copy.score}
             </p>
-            <p className="font-sans text-3xl font-black tabular-nums tracking-tight text-[var(--btn-primary)]">
+            <p className="font-sans text-xl font-black tabular-nums tracking-tight text-[var(--btn-primary)]">
               {session.score}
             </p>
           </div>
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-3 py-2 shadow-sm">
-            <p className="flex items-center gap-1 font-sans text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-body)]">
-              <Trophy className="size-3.5 text-[var(--btn-primary)]" aria-hidden />
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] p-2 shadow-sm">
+            <p className="flex items-center gap-1 font-sans text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-body)]">
+              <Trophy className="size-3 text-[var(--btn-primary)]" aria-hidden />
               {copy.best}
             </p>
-            <p className="font-sans text-3xl font-black tabular-nums tracking-tight text-[var(--text-headline)]">
+            <p className="font-sans text-xl font-black tabular-nums tracking-tight text-[var(--text-headline)]">
               {high}
             </p>
           </div>
         </div>
 
-        <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-3 py-2.5">
-          <p className="flex items-center gap-1.5 font-sans text-[11px] font-bold text-[var(--text-headline)]">
+        <div className="mt-2 shrink-0 rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] p-2">
+          <p className="flex items-center gap-1.5 font-sans text-[10px] font-bold leading-snug text-[var(--text-headline)]">
             <Target className="size-3.5 shrink-0 text-[var(--btn-primary)]" aria-hidden />
-            {copy.goalLabel}
+            <span className="min-w-0 truncate">{copy.goalLabel}</span>
           </p>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/10">
+          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--text-headline)_12%,transparent)]">
             <div
-              className="h-2 rounded-full bg-[var(--btn-primary)]"
+              className="h-1.5 rounded-full bg-[var(--btn-primary)]"
               style={{ width: goalFill }}
             />
           </div>
         </div>
 
         {toast ? (
-          <p className="mt-2 rounded-2xl border border-[var(--border)] bg-[var(--btn-primary)] px-3 py-2 text-center font-sans text-xs font-black text-[var(--btn-text)] shadow-sm">
+          <p className="mt-2 shrink-0 rounded-2xl border border-[var(--border)] bg-[var(--btn-primary)] px-3 py-1.5 text-center font-sans text-[11px] font-black text-[var(--btn-text)] shadow-sm">
             {toast}
           </p>
         ) : null}
 
         <div
-          ref={boardRef}
-          className={`relative mx-auto mt-3 grid w-full max-w-[22rem] grid-cols-8 gap-1 overflow-visible rounded-3xl border-4 border-[var(--border)] bg-[var(--card-surface)] p-3 shadow-2xl ${
-            impact === "shake"
-              ? "blast-board-shake"
-              : impact === "pop"
-                ? "blast-board-pop"
-                : ""
-          }`}
+          ref={stageRef}
+          className="flex min-h-0 flex-1 items-center justify-center py-2"
         >
-          {session.board.map((row, rowIndex) =>
-            row.map((value, colIndex) => {
-              const key = `${rowIndex}-${colIndex}`;
-              const previewHere = hover.piece.includes(key);
-              const blasting = hover.blast.includes(key);
-              const popping = clearing.includes(key);
-              return (
-                <div
-                  key={key}
-                  data-cell={key}
-                  className={`aspect-square rounded-md border border-white/10 bg-black/10 ${
-                    popping ? "relative z-20 overflow-visible" : "transition-none"
-                  }`}
-                >
-                  {value ? (
-                    <span
-                      className={`block h-full w-full rounded-md ${BLOCK_COLOR_CLASS[value as BlockColorId]} ${
-                        popping
-                          ? "blast-pop"
-                          : blasting
-                            ? "brightness-125 ring-2 ring-white/60 transition-none"
-                            : "transition-none"
-                      }`}
-                    />
-                  ) : previewHere ? (
-                    <span className="block h-full w-full rounded-md border-2 border-white/60 bg-white/30 transition-none" />
-                  ) : null}
-                </div>
-              );
-            }),
-          )}
-          {sparks.map((spark) => (
-            <span
-              key={spark.id}
-              aria-hidden
-              className={`pointer-events-none absolute z-30 size-1.5 rounded-full ${spark.tone} blast-spark`}
-              style={{
-                left: `${spark.x}%`,
-                top: `${spark.y}%`,
-                ["--dx" as string]: `${spark.dx}px`,
-                ["--dy" as string]: `${spark.dy}px`,
-              }}
-            />
-          ))}
-          {floats.map((item) => (
-            <p
-              key={item.id}
-              className={`pointer-events-none absolute z-40 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-[var(--btn-primary)] px-2.5 py-1 font-sans text-sm font-black tracking-wide text-[var(--btn-text)] shadow-lg blast-float ${
-                item.hot ? "ring-2 ring-white/70" : ""
-              }`}
-              style={{ left: `${item.x}%`, top: `${item.y}%` }}
-            >
-              {item.text}
-            </p>
-          ))}
+          <div
+            ref={boardRef}
+            className={`relative mx-auto grid aspect-square w-full max-w-[340px] grid-cols-8 gap-0.5 overflow-hidden rounded-2xl border-[3px] border-[var(--border)] bg-[var(--card-surface)] p-1.5 shadow-lg sm:gap-1 sm:rounded-3xl sm:border-4 sm:p-2 ${
+              impact === "shake"
+                ? "blast-board-shake"
+                : impact === "pop"
+                  ? "blast-board-pop"
+                  : ""
+            }`}
+            style={{ width: boardPx, height: boardPx, maxWidth: BOARD_MAX_PX }}
+          >
+            {session.board.map((row, rowIndex) =>
+              row.map((value, colIndex) => {
+                const key = `${rowIndex}-${colIndex}`;
+                const previewHere = hover.piece.includes(key);
+                const blasting = hover.blast.includes(key);
+                const popping = clearing.includes(key);
+                return (
+                  <div
+                    key={key}
+                    data-cell={key}
+                    className={`aspect-square min-h-0 min-w-0 rounded-md border border-[color-mix(in_srgb,var(--text-headline)_10%,transparent)] bg-[color-mix(in_srgb,var(--text-headline)_8%,transparent)] ${
+                      popping ? "relative z-20 overflow-visible" : "transition-none"
+                    }`}
+                  >
+                    {value ? (
+                      <span
+                        className={`block h-full w-full rounded-md ${BLOCK_COLOR_CLASS[value as BlockColorId]} ${
+                          popping
+                            ? "blast-pop"
+                            : blasting
+                              ? "brightness-125 ring-2 ring-[var(--logo-well)]/60 transition-none"
+                              : "transition-none"
+                        }`}
+                      />
+                    ) : previewHere ? (
+                      <span className="block h-full w-full rounded-md border-2 border-[var(--logo-well)]/60 bg-[var(--logo-well)]/30 transition-none" />
+                    ) : null}
+                  </div>
+                );
+              }),
+            )}
+            {sparks.map((spark) => (
+              <span
+                key={spark.id}
+                aria-hidden
+                className={`pointer-events-none absolute z-30 size-1.5 rounded-full ${spark.tone} blast-spark`}
+                style={{
+                  left: `${spark.x}%`,
+                  top: `${spark.y}%`,
+                  ["--dx" as string]: `${spark.dx}px`,
+                  ["--dy" as string]: `${spark.dy}px`,
+                }}
+              />
+            ))}
+            {floats.map((item) => (
+              <p
+                key={item.id}
+                className={`pointer-events-none absolute z-40 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-[var(--btn-primary)] px-2.5 py-1 font-sans text-sm font-black tracking-wide text-[var(--btn-text)] shadow-lg blast-float ${
+                  item.hot ? "ring-2 ring-[var(--logo-well)]/70" : ""
+                }`}
+                style={{ left: `${item.x}%`, top: `${item.y}%` }}
+              >
+                {item.text}
+              </p>
+            ))}
+          </div>
         </div>
 
-        <div ref={trayRef} className="mt-auto grid grid-cols-3 gap-2 pb-1 pt-4">
+        <div
+          ref={trayRef}
+          className="mb-2 grid shrink-0 grid-cols-3 gap-2"
+        >
           {session.tray.map((piece, slot) => (
             <div
               key={slot}
-              className="flex min-h-28 items-center justify-center rounded-3xl border border-[var(--border)] bg-[var(--card-surface)]"
+              className="flex h-24 items-center justify-center overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] sm:h-28"
             >
               {piece ? (
                 <button
@@ -804,10 +880,12 @@ export function BlockBlastGame({
                   onPointerMove={onPointerMove}
                   onPointerUp={onPointerUp}
                   onPointerCancel={onPointerUp}
-                  className={`flex items-center justify-center touch-none p-2 ${drag?.slot === slot ? "opacity-0" : ""}`}
+                  className={`flex size-full items-center justify-center touch-none active:scale-95 ${
+                    drag?.slot === slot ? "opacity-0" : ""
+                  }`}
                   style={{ touchAction: "none" }}
                 >
-                  <PieceGrid shape={piece} cell={TRAY_CELL} />
+                  <TrayPiecePreview shape={piece} />
                 </button>
               ) : null}
             </div>
@@ -913,15 +991,55 @@ export function BlockBlastGame({
   );
 }
 
-function PieceGrid({ shape, cell }: { shape: BlockShape; cell: number }) {
+function TrayPiecePreview({ shape }: { shape: BlockShape }) {
   const box = boundingBox(shape.cells);
+  const offsetR = Math.floor((TRAY_GRID - box.rows) / 2);
+  const offsetC = Math.floor((TRAY_GRID - box.cols) / 2);
+  const side =
+    TRAY_GRID * TRAY_PREVIEW_CELL_PX + (TRAY_GRID - 1) * TRAY_PREVIEW_GAP_PX;
+
   return (
     <div
-      className="grid"
+      className="grid shrink-0"
+      aria-hidden
+      style={{
+        width: side,
+        height: side,
+        gridTemplateColumns: `repeat(${TRAY_GRID}, ${TRAY_PREVIEW_CELL_PX}px)`,
+        gridTemplateRows: `repeat(${TRAY_GRID}, ${TRAY_PREVIEW_CELL_PX}px)`,
+        gap: TRAY_PREVIEW_GAP_PX,
+      }}
+    >
+      {Array.from({ length: TRAY_GRID * TRAY_GRID }, (_, index) => {
+        const row = Math.floor(index / TRAY_GRID);
+        const col = index % TRAY_GRID;
+        const filled = shape.cells.some(
+          (cell) => cell.r + offsetR === row && cell.c + offsetC === col,
+        );
+        return (
+          <span
+            key={`${row}-${col}`}
+            className={`block size-4 shrink-0 rounded-md ${
+              filled ? shape.colorClass : "opacity-0"
+            }`}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/** Board-scale piece used while dragging (matches 8x8 cell size). */
+function PieceGrid({ shape, cell }: { shape: BlockShape; cell: number }) {
+  const box = boundingBox(shape.cells);
+  const gap = pieceGap(cell);
+  return (
+    <div
+      className="grid shrink-0"
       style={{
         gridTemplateColumns: `repeat(${box.cols}, ${cell}px)`,
         gridTemplateRows: `repeat(${box.rows}, ${cell}px)`,
-        gap: Math.max(2, Math.round(cell * 0.08)),
+        gap,
       }}
     >
       {Array.from({ length: box.rows * box.cols }, (_, index) => {
@@ -931,7 +1049,7 @@ function PieceGrid({ shape, cell }: { shape: BlockShape; cell: number }) {
         return (
           <span
             key={`${row}-${col}`}
-            className={`block rounded-md ${filled ? shape.colorClass : "opacity-0"}`}
+            className={`block shrink-0 rounded-md ${filled ? shape.colorClass : "opacity-0"}`}
             style={{ width: cell, height: cell }}
           />
         );

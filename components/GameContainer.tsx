@@ -11,6 +11,7 @@ import { WhoAmIGame } from "@/components/WhoAmIGame";
 import { tenantConfig } from "@/config/tenant.config";
 import { clearArcadeGameSession } from "@/lib/arcadeSession";
 import { beginPlaySession, endPlaySession, formatPlayClock } from "@/lib/playReward";
+import { writeVenueHomeView } from "@/lib/venueHome";
 
 type ActiveGameId = "taboo" | "whoami" | "blockblast";
 
@@ -61,6 +62,7 @@ export function GameContainer({
 
   function handleBack() {
     wipeActiveGame();
+    writeVenueHomeView(tenantId, "lobby");
     onBack();
   }
 
@@ -75,18 +77,18 @@ export function GameContainer({
       className={overlay ? "fixed inset-0 z-[80]" : undefined}
     >
       <PhoneShell>
-        <header className="flex w-full shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-2">
+        <header className="grid w-full shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-b border-[var(--border)] px-3 py-1.5 sm:px-4 sm:py-2">
           <button
             type="button"
             onClick={handleBack}
-            className="flex min-h-12 max-w-[9.5rem] shrink-0 items-center gap-1.5 rounded-full py-2 text-left font-sans text-sm font-bold text-[var(--text-body)] active:scale-95"
+            className="flex min-h-12 max-w-full items-center justify-self-start rounded-full py-2 pr-1 text-left font-sans text-sm font-bold text-[var(--text-body)] active:scale-95"
           >
-            {shell.back}
+            <span className="truncate">{shell.back}</span>
           </button>
-          <h1 className="min-w-0 flex-1 truncate px-2 text-center font-sans text-lg font-black tracking-tight text-[var(--text-headline)]">
+          <h1 className="max-w-[9rem] truncate text-center font-sans text-base font-black tracking-tight text-[var(--text-headline)] sm:max-w-none sm:text-lg">
             {title}
           </h1>
-          <div className="flex w-[9.5rem] shrink-0 justify-end">
+          <div className="flex min-w-0 justify-self-end">
             {activeGame ? (
               <button
                 type="button"
@@ -94,7 +96,7 @@ export function GameContainer({
                 className="inline-flex min-h-12 items-center gap-1 rounded-xl border border-[var(--border)] bg-[var(--card-surface)] p-2 font-sans text-xs font-bold text-[var(--text-headline)] active:scale-95"
               >
                 <RotateCcw className="size-3.5 shrink-0" aria-hidden />
-                {shell.resetShort}
+                <span className="truncate sm:inline">{shell.resetShort}</span>
               </button>
             ) : (
               <div className="text-right">
@@ -111,7 +113,11 @@ export function GameContainer({
             )}
           </div>
         </header>
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-3 pt-3">
+        <div
+          className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-hidden ${
+            activeGame === "blockblast" ? "p-0" : "px-3 pb-2 pt-2 sm:px-4 sm:pb-3 sm:pt-3"
+          }`}
+        >
           {activeGame === "taboo" ? (
             <TabooGame key={sessionEpoch} />
           ) : activeGame === "whoami" ? (

@@ -1,7 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
 import type { ArcadeGame } from "@/lib/gameCatalog";
+import { tenantConfig } from "@/config/tenant.config";
 
 type ArcadeGameCardProps = {
   game: ArcadeGame;
@@ -18,41 +20,58 @@ export function ArcadeGameCard({
   caption,
   onClick,
 }: ArcadeGameCardProps) {
-  const [imageError, setImageError] = useState(false);
-  const Icon = game.icon;
+  const [imageFailed, setImageFailed] = useState(false);
+  const enterCta = tenantConfig.copy.landing.showcase.enterCta;
 
   return (
     <button
       type="button"
       onClick={onClick}
-      className="relative flex min-h-[170px] w-full flex-col justify-between overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card-surface)] p-4 text-left shadow-sm transition-transform duration-150 active:scale-[0.96]"
+      aria-label={`${title}. ${enterCta}`}
+      className="relative flex aspect-[4/5] min-h-[220px] w-full min-w-0 flex-col overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card-surface)] text-left shadow-sm transition-transform duration-150 active:scale-[0.96]"
     >
-      <span className="relative z-10 flex max-w-[62%] flex-col items-start gap-2">
-        <span className="font-sans text-base font-extrabold tracking-tight text-[var(--text-headline)]">
-          {title}
-        </span>
-        <span className="inline-flex rounded-full bg-[var(--btn-primary)]/30 px-2 py-0.5 font-sans text-[11px] font-bold leading-none text-[var(--text-headline)]">
+      {!imageFailed ? (
+        <Image
+          src={game.coverImage}
+          alt=""
+          fill
+          sizes="(max-width: 448px) 50vw, 220px"
+          className="z-0 object-cover"
+          onError={() => setImageFailed(true)}
+          priority={game.id === "blockblast"}
+        />
+      ) : (
+        <span
+          aria-hidden
+          className="absolute inset-0 z-0 bg-[var(--card-surface)]"
+        />
+      )}
+
+      {/* Cover scrim: keeps type readable on any photo (not brand chrome). */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-t from-black/90 via-black/40 to-transparent"
+      />
+
+      <span className="relative z-20 flex h-full flex-col justify-between p-4">
+        <span className="inline-flex max-w-full self-start rounded-full bg-black/30 px-3 py-1 font-sans text-[11px] font-bold text-white backdrop-blur-md">
           {badge}
         </span>
-        <span className="text-xs font-medium leading-snug text-[var(--text-body)]/80 line-clamp-1">
-          {caption}
+
+        <span className="flex items-end justify-between gap-3">
+          <span className="min-w-0 flex-1">
+            <span className="block font-sans text-xl font-black tracking-tight text-white">
+              {title}
+            </span>
+            <span className="mt-1 block font-sans text-xs font-medium leading-snug text-white/80 line-clamp-2">
+              {caption}
+            </span>
+          </span>
+
+          <span className="inline-flex min-h-[48px] shrink-0 items-center justify-center rounded-full bg-[var(--btn-primary)] px-4 py-2 font-sans text-xs font-bold text-[var(--btn-text)] transition-transform active:scale-95 active:brightness-95">
+            {enterCta}
+          </span>
         </span>
-      </span>
-      <span className="pointer-events-none absolute -right-2 -bottom-2 z-0 h-28 w-28">
-        {imageError ? (
-          <Icon
-            aria-hidden
-            className="h-full w-full object-contain object-bottom-right text-[var(--text-headline)]/25 drop-shadow-md"
-          />
-        ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={game.image}
-            alt=""
-            onError={() => setImageError(true)}
-            className="h-full w-full object-contain object-bottom-right drop-shadow-md"
-          />
-        )}
       </span>
     </button>
   );
