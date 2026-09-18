@@ -9,10 +9,10 @@ import { usePlayReward } from "@/components/PlayRewardProvider";
 import { tenantConfig } from "@/config/tenant.config";
 import { getActiveTenantId } from "@/lib/campaignState";
 import {
-  clearCustomerProfile,
   readCustomerProfile,
   type CustomerProfile,
 } from "@/lib/customerProfile";
+import { wipeGuestLocalData } from "@/lib/guestWipe";
 import { useCampaign } from "@/lib/useCampaign";
 
 export default function ProfilePage() {
@@ -27,13 +27,17 @@ export default function ProfilePage() {
 }
 
 function ProfileCard() {
+  const params = useParams<{ tenant?: string }>();
+  const tenantId = params.tenant ?? getActiveTenantId();
   const { player, chooseIdentity } = useDuel();
   const { claimedCode } = usePlayReward();
   const campaign = useCampaign();
   const copy = tenantConfig.copy.landing;
   const tableName = tenantConfig.brand.tableName || copy.gameShell.tableFallback;
   const [saved, setSaved] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
+  const [deleted, setDeleted] = useState(false);
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
 
   useEffect(() => {
@@ -42,6 +46,7 @@ function ProfileCard() {
 
   async function saveToPhone() {
     if (!claimedCode) return;
+    setSaveFailed(false);
     const text = `${campaign.brandName || tenantConfig.brand.name} · ${copy.profileCouponsLabel}: ${claimedCode}`;
     try {
       if (navigator.share) {
@@ -57,12 +62,20 @@ function ProfileCard() {
       setSaved(true);
     } catch {
       setSaved(false);
+      setSaveFailed(true);
     }
   }
 
   function logout() {
-    clearCustomerProfile();
+    wipeGuestLocalData(tenantId);
     setProfile(null);
+    chooseIdentity({ nickname: copy.profileGuest, avatar: player.avatar });
+  }
+
+  function deleteAccount() {
+    wipeGuestLocalData(tenantId);
+    setProfile(null);
+    setDeleted(true);
     chooseIdentity({ nickname: copy.profileGuest, avatar: player.avatar });
   }
 
@@ -120,9 +133,22 @@ function ProfileCard() {
         type="button"
         onClick={saveToPhone}
         disabled={!claimedCode}
-        className="btn-primary w-full disabled:cursor-not-allowed disabled:opacity-40"
+        className="btn-primary min-h-12 w-full disabled:cursor-not-allowed disabled:opacity-40"
       >
         {saved && claimedCode ? copy.profileSaveDone : copy.profileSave}
+      </button>
+      {saveFailed ? (
+        <p className="font-sans text-sm font-medium text-[var(--text-body)]">
+          {copy.profileSaveFailed}
+        </p>
+      ) : null}
+
+      <button
+        type="button"
+        onClick={deleteAccount}
+        className="min-h-12 w-full rounded-2xl border border-[var(--border)] px-4 py-3 font-sans text-sm font-bold text-[var(--text-headline)] transition hover:brightness-95 active:scale-95"
+      >
+        {deleted ? copy.profileDeleteDone : copy.profileDelete}
       </button>
 
       <CustomerAuthModal

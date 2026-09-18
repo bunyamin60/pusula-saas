@@ -1014,6 +1014,14 @@ export const tenantConfig = {
       profileSaveEmpty: "Kaydedilecek kuponun yok.",
       profileGuest: "Misafir",
       profileLogout: "Çıkış Yap",
+      profileDelete: "Hesabımı ve kayıtlarımı sil",
+      profileDeleteDone: "Kayıtların bu cihazdan silindi.",
+      profileSaveFailed: "Kupon kopyalanamadı. İzinleri kontrol et.",
+      recoverTitle: "Bir şey ters gitti",
+      recoverLead:
+        "Sayfa yüklenemedi. Bağlantını kontrol edip tekrar dene.",
+      recoverRetry: "Tekrar dene",
+      offlineBanner: "Çevrimdışısın. Kayıtlı oyunların bu cihazda duruyor.",
       gameShell: {
         back: "← Masaya Dön",
         reset: "Sıfırla / Yeni Oyun",

@@ -59,14 +59,14 @@ function WelcomeScreen({ onEnterLobby }: { onEnterLobby: () => void }) {
   const logoUrl =
     resolveLogoUrl(campaign.logoUrl, tenantId) || tenantConfig.brand.logoUrl;
   const instagram = campaign.instagramUrl || tenantConfig.reward.instagramUrl;
-  const handle = instagramHandleFromUrl(instagram);
-  const instagramLabel = handle
-    ? copy.instagramHandle.replace("{handle}", handle)
+  const instagramHandle = instagramHandleFromUrl(instagram);
+  const instagramLabel = instagramHandle
+    ? copy.instagramHandle.replace("{handle}", instagramHandle)
     : copy.instagramChip;
   const tableLabel = tenantConfig.brand.tableName.trim();
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col justify-between px-1 pb-2">
+    <section className="flex min-h-0 flex-1 flex-col justify-between px-6 pb-6">
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 text-center">
         <BrandLogo src={logoUrl} alt={brand} size="hero" />
         <h1 className="font-sans text-2xl font-extrabold tracking-tight text-[var(--text-headline)]">
@@ -120,8 +120,8 @@ function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
   ];
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-2">
-      <header className="flex w-full items-center justify-between gap-3 py-2">
+    <section className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pb-2">
+      <header className="sticky top-0 z-10 flex w-full items-center justify-between gap-3 bg-background py-2">
         <button
           type="button"
           onClick={onBackWelcome}
@@ -201,7 +201,9 @@ function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
         </p>
       )}
 
-      <DeviceTestReset />
+      <div className="mt-2">
+        <DeviceTestReset />
+      </div>
     </section>
   );
 }
@@ -310,6 +312,8 @@ function instagramHandleFromUrl(url: string): string | null {
   if (!url) return null;
   try {
     const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+    if (host !== "instagram.com" && host !== "instagr.am") return null;
     const skip = new Set(["p", "reel", "reels", "stories", "explore", "accounts"]);
     const handle = parsed.pathname
       .split("/")

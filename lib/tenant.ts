@@ -44,7 +44,7 @@ export function sanitizeTenantId(raw: string | null | undefined): string | null 
   if (!raw) return null;
   const id = raw.trim();
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$/.test(id)) return null;
-  const reserved = new Set(["admin", "api", "favicon.ico"]);
+  const reserved = new Set(["admin", "api", "offline", "favicon.ico"]);
   if (reserved.has(id.toLowerCase())) return null;
   return id;
 }
@@ -118,21 +118,15 @@ export function resolveLogoShape(
   return defaultLogoShape(tenantId);
 }
 
-export function logoFrameClass(shape: LogoShape, size: "compact" | "hero" = "compact"): string {
+export function logoFrameClass(_shape: LogoShape, size: "compact" | "hero" = "compact"): string {
   if (size === "compact") {
-    return "flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-100 bg-white p-2 shadow-xs";
+    return "flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--logo-well)] p-1.5 shadow-sm";
   }
-  if (shape === "circle") {
-    return "flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#272343]/15 bg-[#e3f6f5] shadow-sm";
-  }
-  return "flex h-24 w-auto max-w-[220px] shrink-0 items-center justify-center rounded-2xl border border-[#272343]/15 bg-[#e3f6f5] p-1.5 shadow-sm";
+  return "mx-auto flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--logo-well)] p-2.5 shadow-sm";
 }
 
-export function logoImageClass(shape: LogoShape, size: "compact" | "hero" = "hero"): string {
-  if (size === "compact") return "h-full w-full object-contain";
-  return shape === "circle"
-    ? "h-full w-full object-cover"
-    : "h-full w-auto max-h-full object-contain";
+export function logoImageClass(_shape?: LogoShape, _size: "compact" | "hero" = "hero"): string {
+  return "h-full w-full object-contain";
 }
 
 export function categoryFromPreset(preset: ThemePresetId): TenantCategory {

@@ -83,7 +83,7 @@ export function CustomerAuthModal({
                 type="button"
                 onClick={onClose}
                 aria-label={tenantConfig.copy.playReward.close}
-                className="flex size-10 shrink-0 items-center justify-center rounded-full border-2 border-ink/20 bg-background text-ink"
+                className="inline-flex min-h-12 min-w-12 shrink-0 items-center justify-center rounded-full border-2 border-ink/20 bg-background text-ink"
               >
                 <X className="size-4" />
               </button>
@@ -99,6 +99,12 @@ export function CustomerAuthModal({
                   autoComplete="name"
                   required
                   className="field-input mt-2"
+                  onFocus={(event) => {
+                    event.currentTarget.scrollIntoView({
+                      block: "center",
+                      behavior: "smooth",
+                    });
+                  }}
                 />
               </label>
               <label className="block">
@@ -112,6 +118,12 @@ export function CustomerAuthModal({
                   inputMode="email"
                   required
                   className="field-input mt-2"
+                  onFocus={(event) => {
+                    event.currentTarget.scrollIntoView({
+                      block: "center",
+                      behavior: "smooth",
+                    });
+                  }}
                 />
               </label>
               <button type="submit" className="btn-primary mt-2 w-full">

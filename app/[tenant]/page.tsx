@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { GuestDock } from "@/components/GuestDock";
 import { GuestProviders } from "@/components/GuestProviders";
 import { Landing } from "@/components/Landing";
+import { PhoneShell } from "@/components/PhoneShell";
+import { logCampaignEvent } from "@/lib/analytics";
 import { getActiveTenantId } from "@/lib/campaignState";
 import { useCampaign } from "@/lib/useCampaign";
 import {
@@ -45,6 +47,7 @@ export default function TenantHome() {
     writeVenueHomeView(tenantId, "lobby");
     window.history.pushState({ venueHome: "lobby" }, "");
     setView("lobby");
+    void logCampaignEvent(tenantId, "home_cta");
   }
 
   function backWelcome() {
@@ -59,7 +62,7 @@ export default function TenantHome() {
 
   return (
     <GuestProviders tenantId={tenantId}>
-      <Shell paddedBottom={view === "lobby"}>
+      <PhoneShell paddedBottom={view === "lobby"}>
         <Landing
           view={view}
           onEnterLobby={enterLobby}
@@ -67,29 +70,7 @@ export default function TenantHome() {
         />
         {view === "lobby" ? <GuestDock /> : null}
         <span className="sr-only">{campaign.brandName}</span>
-      </Shell>
+      </PhoneShell>
     </GuestProviders>
-  );
-}
-
-function Shell({
-  children,
-  paddedBottom,
-}: {
-  children: ReactNode;
-  paddedBottom: boolean;
-}) {
-  return (
-    <div className="flex min-h-[100dvh] w-full justify-center bg-[var(--card-surface)]">
-      <main
-        className={`relative mx-auto flex h-[100dvh] min-h-[100dvh] w-full max-w-md flex-col overflow-hidden bg-[var(--bg-canvas)] px-5 pt-[env(safe-area-inset-top)] shadow-2xl ${
-          paddedBottom
-            ? "pb-[calc(5.5rem+env(safe-area-inset-bottom))]"
-            : "pb-[env(safe-area-inset-bottom)]"
-        }`}
-      >
-        {children}
-      </main>
-    </div>
   );
 }

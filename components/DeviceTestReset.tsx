@@ -3,16 +3,9 @@
 import { useParams } from "next/navigation";
 import { usePlayReward } from "@/components/PlayRewardProvider";
 import { tenantConfig } from "@/config/tenant.config";
-import { resetPusulaCountedFlag } from "@/lib/analytics";
 import { getActiveTenantId } from "@/lib/campaignState";
-import { clearLoyalty } from "@/lib/loyalty";
-import { clearPlayRewardProgress } from "@/lib/playReward";
-import { clearCustomerProfile } from "@/lib/customerProfile";
-import { clearGossipLocalState } from "@/lib/dailyQuestion";
-import { resetSession } from "@/lib/session";
-import { clearStampCard } from "@/lib/stampCard";
+import { wipeGuestLocalData } from "@/lib/guestWipe";
 import { DEFAULT_TENANT_ID } from "@/lib/tenant";
-import { clearVenueHomeView } from "@/lib/venueHome";
 
 export function DeviceTestReset() {
   const copy = tenantConfig.copy.match;
@@ -22,14 +15,7 @@ export function DeviceTestReset() {
 
   function resetDevice() {
     try {
-      clearLoyalty(tenantId);
-      resetPusulaCountedFlag();
-      clearPlayRewardProgress();
-      resetSession();
-      clearCustomerProfile();
-      clearGossipLocalState();
-      clearStampCard(tenantId);
-      clearVenueHomeView(tenantId);
+      wipeGuestLocalData(tenantId);
     } catch {
       // Test helper must never throw into the guest flow.
     }

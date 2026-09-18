@@ -9,12 +9,14 @@ export function BrandLogo({
   src,
   alt,
   size,
+  fallback,
 }: {
   src?: string;
   alt: string;
   size: BrandLogoSize;
+  fallback?: string;
 }) {
-  const initials = alt.trim().slice(0, 2);
+  const initials = (fallback || alt).trim().slice(0, 2);
   return (
     <div
       className={`flex shrink-0 items-center justify-center overflow-hidden border border-[var(--border)] bg-[var(--logo-well)] shadow-sm ${SIZE_CLASS[size]}`}

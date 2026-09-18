@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { redirect } from "next/navigation";
-import type { ReactNode } from "react";
+import { cache, type ReactNode } from "react";
 import { TenantProvider } from "@/components/TenantProvider";
 import { tenantConfig } from "@/config/tenant.config";
 import {
@@ -18,7 +18,7 @@ type TenantLayoutProps = {
   params: Promise<{ tenant: string }>;
 };
 
-async function loadTenant(tenant: string) {
+const loadTenant = cache(async (tenant: string) => {
   const id = sanitizeTenantId(tenant);
   if (!id) return null;
   const row = await fetchTenantRowServer(id);
@@ -26,7 +26,7 @@ async function loadTenant(tenant: string) {
     id,
     campaign: row ? campaignFromRow(row) : defaultCampaign(id),
   };
-}
+});
 
 export async function generateMetadata({
   params,

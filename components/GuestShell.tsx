@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { GuestDock } from "@/components/GuestDock";
 import { GuestProviders } from "@/components/GuestProviders";
+import { PhoneShell } from "@/components/PhoneShell";
 import { RewardProgressBar } from "@/components/RewardProgressBar";
 
 export function GuestShell({
@@ -18,16 +19,17 @@ export function GuestShell({
 }) {
   return (
     <GuestProviders tenantId={tenantId} extraActive={extraActive}>
-      <main
-        className={`relative mx-auto flex w-full max-w-md flex-col overflow-x-hidden bg-[var(--bg-canvas)] px-5 pt-[env(safe-area-inset-top)] ${
-          locked ? "h-[100dvh] overflow-hidden overscroll-none" : "min-h-[100dvh]"
-        }`}
-        style={{ paddingBottom: "calc(5.5rem + env(safe-area-inset-bottom))" }}
-      >
-        <RewardProgressBar compact />
-        {children}
+      <PhoneShell paddedBottom>
+        <div
+          className={`flex min-h-0 flex-1 flex-col px-5 ${
+            locked ? "overflow-hidden overscroll-none" : "overflow-x-hidden overflow-y-auto"
+          }`}
+        >
+          <RewardProgressBar compact />
+          {children}
+        </div>
         <GuestDock />
-      </main>
+      </PhoneShell>
     </GuestProviders>
   );
 }
