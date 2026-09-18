@@ -1022,6 +1022,10 @@ export const tenantConfig = {
         "Sayfa yüklenemedi. Bağlantını kontrol edip tekrar dene.",
       recoverRetry: "Tekrar dene",
       offlineBanner: "Çevrimdışısın. Kayıtlı oyunların bu cihazda duruyor.",
+      offlineTitle: "Bağlantı Koptu!",
+      offlineLead:
+        "Kafenin Wi-Fi ağı biraz dalgalanıyor olabilir. Masanın keyfini kaçırma, bağlantın gelince oyun hazır!",
+      offlineRetry: "Tekrar Dene",
       gameShell: {
         back: "← Masaya Dön",
         reset: "Sıfırla / Yeni Oyun",
