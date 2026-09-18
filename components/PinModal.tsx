@@ -105,7 +105,7 @@ export function PinModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex size-10 items-center justify-center rounded-full bg-surface text-ink"
+            className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-full bg-surface text-ink"
             aria-label={copy.close}
           >
             <X className="size-4" />

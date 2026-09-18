@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode, type RefObject } from "react";
 import { RotateCcw } from "lucide-react";
 import { BlockBlastGame } from "@/components/BlockBlastGame";
 import { useDuel } from "@/components/DuelProvider";
+import { PhoneShell } from "@/components/PhoneShell";
 import { usePlayReward } from "@/components/PlayRewardProvider";
 import { TabooGame } from "@/components/TabooGame";
 import { WhoAmIGame } from "@/components/WhoAmIGame";
@@ -71,22 +72,14 @@ export function GameContainer({
   return (
     <div
       ref={containerRef}
-      className={
-        overlay
-          ? "fixed inset-0 z-[80] flex justify-center bg-background"
-          : "flex min-h-dvh justify-center bg-background"
-      }
+      className={overlay ? "fixed inset-0 z-[80]" : undefined}
     >
-      <div
-        className={`flex w-full flex-col overflow-hidden bg-background pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] ${
-          overlay ? "h-dvh" : "min-h-dvh"
-        } ${activeGame === "whoami" ? "max-w-md landscape:max-w-none" : "max-w-md"}`}
-      >
-        <header className="flex w-full shrink-0 items-center justify-between border-b border-[var(--border)] px-4 py-3">
+      <PhoneShell>
+        <header className="flex w-full shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-2">
           <button
             type="button"
             onClick={handleBack}
-            className="ml-8 flex min-h-12 max-w-[9.5rem] shrink-0 items-center gap-1.5 rounded-full py-2 text-left font-sans text-sm font-bold text-[var(--text-body)] active:scale-95"
+            className="flex min-h-12 max-w-[9.5rem] shrink-0 items-center gap-1.5 rounded-full py-2 text-left font-sans text-sm font-bold text-[var(--text-body)] active:scale-95"
           >
             {shell.back}
           </button>
@@ -133,7 +126,7 @@ export function GameContainer({
             children
           )}
         </div>
-      </div>
+      </PhoneShell>
     </div>
   );
 }

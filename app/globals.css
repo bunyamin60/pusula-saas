@@ -33,6 +33,7 @@ html {
 
 :root {
   --bg-canvas: #fffffe;
+  --logo-well: #fffffe;
   --text-headline: #272343;
   --text-body: #2d334a;
   --btn-primary: #ffd803;
@@ -785,15 +786,15 @@ body {
 
 .quiz-flash-ok {
   box-shadow:
-    0 0 0 1px rgba(52, 211, 153, 0.85),
-    0 0 18px rgba(16, 185, 129, 0.55);
+    0 0 0 1px color-mix(in srgb, var(--btn-primary) 85%, transparent),
+    0 0 18px color-mix(in srgb, var(--btn-primary) 55%, transparent);
   animation: quiz-flash-ok 420ms ease-out;
 }
 
 .quiz-flash-bad {
   box-shadow:
-    0 0 0 1px rgba(248, 113, 113, 0.9),
-    0 0 18px rgba(239, 68, 68, 0.5);
+    0 0 0 1px color-mix(in srgb, var(--text-headline) 50%, transparent),
+    0 0 18px color-mix(in srgb, var(--text-headline) 25%, transparent);
   animation: quiz-flash-bad 420ms ease-out;
 }
 
@@ -801,8 +802,8 @@ body {
   0% {
     transform: scale(0.98);
     box-shadow:
-      0 0 0 0 rgba(16, 185, 129, 0.7),
-      0 0 0 0 rgba(16, 185, 129, 0.35);
+      0 0 0 0 color-mix(in srgb, var(--btn-primary) 70%, transparent),
+      0 0 0 0 color-mix(in srgb, var(--btn-primary) 35%, transparent);
   }
   100% {
     transform: scale(1);
@@ -813,8 +814,8 @@ body {
   0% {
     transform: scale(0.98);
     box-shadow:
-      0 0 0 0 rgba(239, 68, 68, 0.7),
-      0 0 0 0 rgba(239, 68, 68, 0.35);
+      0 0 0 0 color-mix(in srgb, var(--text-headline) 50%, transparent),
+      0 0 0 0 color-mix(in srgb, var(--text-headline) 25%, transparent);
   }
   100% {
     transform: scale(1);

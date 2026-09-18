@@ -78,7 +78,7 @@ function TableReadySheet({
               type="button"
               onClick={onClose}
               aria-label={copy.close}
-              className="flex size-10 items-center justify-center rounded-full border-2 border-[var(--text-headline)]/20 bg-[var(--bg-canvas)] text-[var(--text-headline)]"
+              className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-full border-2 border-[var(--text-headline)]/20 bg-[var(--bg-canvas)] text-[var(--text-headline)]"
             >
               <X className="size-4" />
             </button>

@@ -946,8 +946,13 @@ export const tenantConfig = {
       authSubmit: "Giriş Yap",
       authBadge: "Müdavim: {name}",
       welcomeBadge: "Hoş geldin, {name} 👋",
+      welcomeLead:
+        "Hoş geldin! Oyununu seç, siparişin gelene kadar oyna.",
+      playCta: "Oyunlara Başla",
+      welcomeBack: "Geri",
       googleReviewChip: "Google'da Değerlendir",
       instagramChip: "Instagram",
+      instagramHandle: "@{handle}",
       tabs: {
         games: "Oyunlar",
         events: "Etkinlikler",
@@ -1009,6 +1014,14 @@ export const tenantConfig = {
       profileSaveEmpty: "Kaydedilecek kuponun yok.",
       profileGuest: "Misafir",
       profileLogout: "Çıkış Yap",
+      profileDelete: "Hesabımı ve kayıtlarımı sil",
+      profileDeleteDone: "Kayıtların bu cihazdan silindi.",
+      profileSaveFailed: "Kupon kopyalanamadı. İzinleri kontrol et.",
+      recoverTitle: "Bir şey ters gitti",
+      recoverLead:
+        "Sayfa yüklenemedi. Bağlantını kontrol edip tekrar dene.",
+      recoverRetry: "Tekrar dene",
+      offlineBanner: "Çevrimdışısın. Kayıtlı oyunların bu cihazda duruyor.",
       gameShell: {
         back: "← Masaya Dön",
         reset: "Sıfırla / Yeni Oyun",

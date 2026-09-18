@@ -45,18 +45,18 @@ export function CafeQuiz() {
 
   if (!introDone) {
     return (
-      <section className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <GameCountdown onDone={() => setIntroDone(true)} />
       </section>
     );
   }
 
   return (
-    <section className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       {done || !item ? (
-        <div className="mt-6 text-center">
-          <p className="font-sans text-4xl font-extrabold tracking-tight text-ink">{score}</p>
-          <p className="mt-2 font-sans text-sm font-medium text-muted">{copy.leaderboardAllTime}</p>
+        <div className="mt-4 min-h-0 flex-1 overflow-y-auto text-center">
+          <p className="font-sans text-4xl font-extrabold tracking-tight text-[var(--text-headline)]">{score}</p>
+          <p className="mt-2 font-sans text-sm font-medium text-[var(--text-body)]">{copy.leaderboardAllTime}</p>
           {boardReady ? (
             <div className="mt-6 text-left">
               <DuelLeaderboard tenantId={tenantId} player={player} score={score} />
@@ -147,27 +147,33 @@ function QuizRound({
   const urgent = remaining < 4000 && !locked;
 
   return (
-    <div className="mt-4 flex flex-1 flex-col pb-2">
-      <div className="flex items-center justify-between font-sans text-xs font-medium uppercase tracking-[0.1em] text-muted">
-        <span>
-          {roundLabel
-            .replace("{current}", String(current))
-            .replace("{total}", String(total))}
-        </span>
-        <span>{secondsLabel.replace("{seconds}", String(Math.ceil(remaining / 1000)))}</span>
+    <div className="flex min-h-0 flex-1 flex-col justify-between gap-3 overflow-hidden pb-1">
+      <div className="shrink-0">
+        <div className="flex items-center justify-between font-sans text-xs font-medium uppercase tracking-[0.1em] text-[var(--text-body)]">
+          <span>
+            {roundLabel
+              .replace("{current}", String(current))
+              .replace("{total}", String(total))}
+          </span>
+          <span>{secondsLabel.replace("{seconds}", String(Math.ceil(remaining / 1000)))}</span>
+        </div>
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--card-surface)]">
+          <div
+            className={`h-full rounded-full bg-[var(--btn-primary)] ${
+              urgent ? "quiz-timer-pulse" : ""
+            }`}
+            style={{ width: `${remaining / 100}%` }}
+          />
+        </div>
       </div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-surface">
-        <div
-          className={`h-full rounded-full bg-primary ${
-            urgent ? "quiz-timer-pulse" : ""
-          }`}
-          style={{ width: `${remaining / 100}%` }}
-        />
+      <div className="flex min-h-0 flex-1 items-center">
+        <div className="w-full rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] p-4 text-center shadow-sm">
+          <h2 className="font-sans text-xl font-extrabold leading-snug tracking-tight text-[var(--text-headline)]">
+            {prompt}
+          </h2>
+        </div>
       </div>
-      <div className="mt-6 rounded-2xl border border-ink/15 bg-surface p-6 text-center shadow-sm">
-        <h2 className="font-sans text-2xl font-extrabold leading-tight tracking-tight text-on-surface">{prompt}</h2>
-      </div>
-      <div className="mt-5 grid gap-3">
+      <div className="grid shrink-0 gap-2">
         {options.map((option, index) => {
           const chosen = selected === index;
           const isCorrect = locked && index === answer;
@@ -179,34 +185,34 @@ function QuizRound({
               type="button"
               disabled={locked}
               onClick={() => choose(index)}
-              className={`flex min-h-14 items-center gap-3 rounded-2xl border px-3 text-left font-sans text-sm font-bold shadow-sm transition hover:brightness-95 active:scale-95 ${
+              className={`flex min-h-12 items-center gap-3 rounded-2xl border px-3 py-3 text-left font-sans text-sm font-bold shadow-sm transition hover:brightness-95 active:scale-95 ${
                 isCorrect
-                  ? "quiz-flash-ok scale-[1.02] border-emerald-400 bg-emerald-500/15 text-emerald-900"
+                  ? "quiz-flash-ok scale-[1.02] border-[var(--btn-primary)] bg-[var(--btn-primary)] text-[var(--btn-text)]"
                   : isWrong
-                    ? "quiz-flash-bad scale-[1.02] border-rose-400 bg-rose-500/15 text-rose-800"
-                    : "border-transparent bg-primary text-on-primary"
+                    ? "quiz-flash-bad scale-[1.02] border-[var(--text-headline)]/25 bg-[var(--text-headline)]/10 text-[var(--text-headline)]"
+                    : "border-transparent bg-[var(--btn-primary)] text-[var(--btn-text)]"
               }`}
             >
               <span
                 className={`flex size-8 shrink-0 items-center justify-center rounded-full font-sans text-[11px] font-extrabold ${
                   isCorrect || isWrong
-                    ? "bg-background text-ink"
-                    : "bg-ink/10 text-on-primary"
+                    ? "bg-[var(--bg-canvas)] text-[var(--text-headline)]"
+                    : "bg-[var(--text-headline)]/10 text-[var(--btn-text)]"
                 }`}
               >
                 {letter}
               </span>
-              <span className="min-w-0 flex-1 py-3 leading-snug">{option}</span>
+              <span className="min-w-0 flex-1 leading-snug">{option}</span>
             </button>
           );
         })}
       </div>
       {locked ? (
-        <div className="mt-auto pt-6">
+        <div className="shrink-0 pt-1">
           <button
             type="button"
             onClick={onAdvance}
-            className="w-full py-4 rounded-2xl bg-[var(--btn-primary)] text-[var(--btn-text)] font-extrabold shadow-md hover:brightness-95 active:scale-95 transition-all text-base"
+            className="min-h-12 w-full rounded-2xl bg-[var(--btn-primary)] py-3 font-sans text-base font-extrabold text-[var(--btn-text)] shadow-md transition-all hover:brightness-95 active:scale-95"
           >
             {current >= total ? resultsLabel : nextLabel}
           </button>
