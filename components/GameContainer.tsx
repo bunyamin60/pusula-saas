@@ -111,7 +111,7 @@ export function GameContainer({
             )}
           </div>
         </header>
-        <div className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden px-4">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-3 pt-3">
           {activeGame === "taboo" ? (
             <TabooGame key={sessionEpoch} />
           ) : activeGame === "whoami" ? (

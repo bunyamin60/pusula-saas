@@ -37,12 +37,19 @@ function ProfileCard() {
   const [saved, setSaved] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
-  const [deleted, setDeleted] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
 
   useEffect(() => {
     setProfile(readCustomerProfile());
   }, []);
+
+  useEffect(() => {
+    if (!isConfirming) return;
+    const timer = window.setTimeout(() => setIsConfirming(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [isConfirming]);
 
   async function saveToPhone() {
     if (!claimedCode) return;
@@ -75,8 +82,10 @@ function ProfileCard() {
   function deleteAccount() {
     wipeGuestLocalData(tenantId);
     setProfile(null);
-    setDeleted(true);
     chooseIdentity({ nickname: copy.profileGuest, avatar: player.avatar });
+    setIsConfirming(false);
+    setToast(copy.profileDeleteDone);
+    window.setTimeout(() => window.location.reload(), 900);
   }
 
   return (
@@ -92,7 +101,7 @@ function ProfileCard() {
           <button
             type="button"
             onClick={logout}
-            className="mt-4 w-full rounded-2xl border border-[var(--text-headline)]/20 px-4 py-3 font-sans text-sm font-bold text-[var(--text-headline)] transition hover:bg-[var(--bg-canvas)]"
+            className="mt-4 min-h-12 w-full rounded-2xl border border-[var(--text-headline)]/20 px-4 py-3 font-sans text-sm font-bold text-[var(--text-headline)] transition hover:bg-[var(--bg-canvas)] active:scale-95"
           >
             {copy.profileLogout}
           </button>
@@ -143,13 +152,41 @@ function ProfileCard() {
         </p>
       ) : null}
 
-      <button
-        type="button"
-        onClick={deleteAccount}
-        className="min-h-12 w-full rounded-2xl border border-[var(--border)] px-4 py-3 font-sans text-sm font-bold text-[var(--text-headline)] transition hover:brightness-95 active:scale-95"
-      >
-        {deleted ? copy.profileDeleteDone : copy.profileDelete}
-      </button>
+      {isConfirming ? (
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={deleteAccount}
+            className="min-h-12 w-full rounded-2xl bg-[var(--quiz-bad)] px-4 py-3 font-sans text-sm font-bold text-[var(--quiz-on-feedback)] shadow-sm transition active:scale-95 active:brightness-95"
+          >
+            {copy.profileDeleteConfirm}
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsConfirming(false)}
+            className="min-h-12 w-full rounded-2xl bg-[var(--card-surface)] px-4 py-3 font-sans text-sm font-medium text-[var(--text-body)] transition active:scale-95 active:brightness-95"
+          >
+            {copy.profileDeleteCancel}
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setIsConfirming(true)}
+          className="min-h-12 w-full rounded-2xl border border-[var(--border)] px-4 py-3 font-sans text-sm font-bold text-[var(--text-headline)] transition hover:brightness-95 active:scale-95"
+        >
+          {copy.profileDelete}
+        </button>
+      )}
+
+      {toast ? (
+        <p
+          role="status"
+          className="fixed inset-x-4 bottom-[max(1.25rem,env(safe-area-inset-bottom))] z-[70] mx-auto w-full max-w-md rounded-2xl bg-[var(--text-headline)] px-4 py-3 text-center font-sans text-sm font-bold text-[var(--bg-canvas)] shadow-lg"
+        >
+          {toast}
+        </p>
+      ) : null}
 
       <CustomerAuthModal
         open={authOpen}
