@@ -254,7 +254,10 @@ export function sealPlayRewardClaim(code: string, recipeId: string): PlayRewardP
     elapsedSeconds: Math.max(current.elapsedSeconds, target),
     isUnlocked: true,
     claimedCode: current.claimedCode || code,
-    recipeId: current.recipeId || recipeId,
+    recipeId:
+      current.recipeId && current.recipeId !== "campaign"
+        ? current.recipeId
+        : recipeId,
     lastPing: Date.now(),
   });
   const sealed = next.claimedCode || code;

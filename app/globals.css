@@ -42,6 +42,11 @@ html {
   --card-border: color-mix(in srgb, #272343 20%, transparent);
   --tab-active-bg: #272343;
   --tab-active-text: #ffffff;
+  --quiz-ok: #10b981;
+  --quiz-ok-border: #059669;
+  --quiz-bad: #f43f5e;
+  --quiz-bad-border: #e11d48;
+  --quiz-on-feedback: var(--logo-well);
 }
 
 body {
@@ -786,15 +791,15 @@ body {
 
 .quiz-flash-ok {
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--btn-primary) 85%, transparent),
-    0 0 18px color-mix(in srgb, var(--btn-primary) 55%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--quiz-ok) 85%, transparent),
+    0 0 18px color-mix(in srgb, var(--quiz-ok) 55%, transparent);
   animation: quiz-flash-ok 420ms ease-out;
 }
 
 .quiz-flash-bad {
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--text-headline) 50%, transparent),
-    0 0 18px color-mix(in srgb, var(--text-headline) 25%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--quiz-bad) 85%, transparent),
+    0 0 18px color-mix(in srgb, var(--quiz-bad) 45%, transparent);
   animation: quiz-flash-bad 420ms ease-out;
 }
 
@@ -802,8 +807,8 @@ body {
   0% {
     transform: scale(0.98);
     box-shadow:
-      0 0 0 0 color-mix(in srgb, var(--btn-primary) 70%, transparent),
-      0 0 0 0 color-mix(in srgb, var(--btn-primary) 35%, transparent);
+      0 0 0 0 color-mix(in srgb, var(--quiz-ok) 70%, transparent),
+      0 0 0 0 color-mix(in srgb, var(--quiz-ok) 35%, transparent);
   }
   100% {
     transform: scale(1);
@@ -814,8 +819,8 @@ body {
   0% {
     transform: scale(0.98);
     box-shadow:
-      0 0 0 0 color-mix(in srgb, var(--text-headline) 50%, transparent),
-      0 0 0 0 color-mix(in srgb, var(--text-headline) 25%, transparent);
+      0 0 0 0 color-mix(in srgb, var(--quiz-bad) 70%, transparent),
+      0 0 0 0 color-mix(in srgb, var(--quiz-bad) 35%, transparent);
   }
   100% {
     transform: scale(1);
