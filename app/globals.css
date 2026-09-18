@@ -33,6 +33,7 @@ html {
 
 :root {
   --bg-canvas: #fffffe;
+  --logo-well: #fffffe;
   --text-headline: #272343;
   --text-body: #2d334a;
   --btn-primary: #ffd803;

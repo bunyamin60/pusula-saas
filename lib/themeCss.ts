@@ -24,6 +24,7 @@ export function themeVarEntries(
     ["--card-bg", theme.surface],
     ["--accent", theme.primaryHover],
     ["--bg-canvas", theme.background],
+    ["--logo-well", "#fffffe"],
     ["--text-headline", theme.textDark],
     ["--text-body", theme.textMuted],
     ["--btn-primary", theme.primary],

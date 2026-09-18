@@ -12,6 +12,7 @@ import { clearGossipLocalState } from "@/lib/dailyQuestion";
 import { resetSession } from "@/lib/session";
 import { clearStampCard } from "@/lib/stampCard";
 import { DEFAULT_TENANT_ID } from "@/lib/tenant";
+import { clearVenueHomeView } from "@/lib/venueHome";
 
 export function DeviceTestReset() {
   const copy = tenantConfig.copy.match;
@@ -28,6 +29,7 @@ export function DeviceTestReset() {
       clearCustomerProfile();
       clearGossipLocalState();
       clearStampCard(tenantId);
+      clearVenueHomeView(tenantId);
     } catch {
       // Test helper must never throw into the guest flow.
     }

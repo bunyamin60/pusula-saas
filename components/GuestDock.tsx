@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useDuel } from "@/components/DuelProvider";
 import { tenantConfig } from "@/config/tenant.config";
+import { writeVenueHomeView } from "@/lib/venueHome";
 
 export function GuestDock() {
   const copy = tenantConfig.copy.landing.dock;
@@ -17,12 +18,8 @@ export function GuestDock() {
 
   return (
     <nav
-      className="fixed bottom-4 z-50 w-[min(24rem,calc(100%-2rem))] rounded-full border border-ink/15 bg-background/90 p-1.5 shadow-xl backdrop-blur-md"
-      style={{
-        left: "50%",
-        transform: "translateX(-50%)",
-        bottom: "max(1rem, env(safe-area-inset-bottom))",
-      }}
+      className="absolute inset-x-4 z-50 rounded-full border border-[var(--border)] bg-[var(--bg-canvas)]/90 p-1.5 shadow-xl backdrop-blur-md"
+      style={{ bottom: "max(1rem, env(safe-area-inset-bottom))" }}
     >
       <div className="grid grid-cols-2 gap-1">
         {items.map((item) => {
@@ -34,8 +31,11 @@ export function GuestDock() {
             <button
               key={item.id}
               type="button"
-              onClick={() => router.push(item.href)}
-              className={`rounded-full px-2 py-3 text-center font-sans text-[12px] leading-tight tracking-wide transition-colors ${
+              onClick={() => {
+                if (item.id === "games") writeVenueHomeView(tenantId, "lobby");
+                router.push(item.href);
+              }}
+              className={`min-h-12 rounded-full px-2 py-3 text-center font-sans text-[12px] leading-tight tracking-wide transition-colors ${
                 active
                   ? "bg-[var(--tab-active-bg)] font-bold text-[var(--tab-active-text)]"
                   : "bg-transparent font-semibold text-[var(--text-body)]"

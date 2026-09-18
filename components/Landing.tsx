@@ -3,19 +3,16 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Award, Medal, Trophy } from "lucide-react";
+import { Award, ChevronLeft, Medal, Trophy } from "lucide-react";
 import { ArcadeGameCard } from "@/components/ArcadeGameCard";
-import { CustomerAuthModal } from "@/components/CustomerAuthModal";
+import { BrandLogo } from "@/components/BrandLogo";
 import { DailyQuestionFeed } from "@/components/DailyQuestionFeed";
 import { DeviceTestReset } from "@/components/DeviceTestReset";
 import { LoyaltyStampCard } from "@/components/LoyaltyStampCard";
+import { RewardProgressBar } from "@/components/RewardProgressBar";
 import { useDuel } from "@/components/DuelProvider";
 import { tenantConfig } from "@/config/tenant.config";
 import { arcadeGameCopy, featuredArcadeGames } from "@/lib/gameCatalog";
-import {
-  readCustomerProfile,
-  type CustomerProfile,
-} from "@/lib/customerProfile";
 import {
   fetchQuizLeaderboard,
   type ArcadeScoreGame,
@@ -23,29 +20,98 @@ import {
 } from "@/lib/duelLeaderboard";
 import { resolveLogoUrl } from "@/lib/tenant";
 import { useCampaign } from "@/lib/useCampaign";
+import type { VenueHomeView } from "@/lib/venueHome";
 
 type LobbyTab = "games" | "events" | "surveys";
 
-export function Landing() {
+export function Landing({
+  view,
+  onEnterLobby,
+  onBackWelcome,
+}: {
+  view: VenueHomeView;
+  onEnterLobby: () => void;
+  onBackWelcome: () => void;
+}) {
+  return (
+    <div key={view} className="flex min-h-0 flex-1 flex-col overflow-hidden venue-enter">
+      {view === "welcome" ? (
+        <WelcomeScreen onEnterLobby={onEnterLobby} />
+      ) : (
+        <GameLobby onBackWelcome={onBackWelcome} />
+      )}
+      <style>{`
+        @keyframes venueEnter {
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .venue-enter { animation: venueEnter 280ms ease-out; }
+      `}</style>
+    </div>
+  );
+}
+
+function WelcomeScreen({ onEnterLobby }: { onEnterLobby: () => void }) {
   const copy = tenantConfig.copy.landing;
   const campaign = useCampaign();
-  const router = useRouter();
-  const { tenantId, player, chooseIdentity } = useDuel();
-  const [tab, setTab] = useState<LobbyTab>("games");
-  const [authOpen, setAuthOpen] = useState(false);
-  const [profile, setProfile] = useState<CustomerProfile | null>(null);
-
-  useEffect(() => {
-    setProfile(readCustomerProfile());
-  }, []);
-
+  const { tenantId } = useDuel();
   const brand = (campaign.brandName || tenantConfig.brand.name).trim();
   const logoUrl =
     resolveLogoUrl(campaign.logoUrl, tenantId) || tenantConfig.brand.logoUrl;
-  const google =
-    campaign.googleReviewUrl || tenantConfig.reward.googleReviewUrl;
-  const instagram =
-    campaign.instagramUrl || tenantConfig.reward.instagramUrl;
+  const instagram = campaign.instagramUrl || tenantConfig.reward.instagramUrl;
+  const handle = instagramHandleFromUrl(instagram);
+  const instagramLabel = handle
+    ? copy.instagramHandle.replace("{handle}", handle)
+    : copy.instagramChip;
+  const tableLabel = tenantConfig.brand.tableName.trim();
+
+  return (
+    <section className="flex min-h-0 flex-1 flex-col justify-between px-1 pb-2">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 text-center">
+        <BrandLogo src={logoUrl} alt={brand} size="hero" />
+        <h1 className="font-sans text-2xl font-extrabold tracking-tight text-[var(--text-headline)]">
+          {brand}
+        </h1>
+        <p className="mx-auto max-w-[20rem] font-sans text-sm font-medium leading-snug text-[var(--text-body)]">
+          {copy.welcomeLead}
+        </p>
+        {tableLabel ? (
+          <span className="inline-flex min-h-10 items-center rounded-full border border-[var(--border)] bg-[var(--card-surface)] px-4 py-1.5 font-sans text-sm font-bold text-[var(--text-headline)]">
+            {tableLabel}
+          </span>
+        ) : null}
+        {instagram ? (
+          <a
+            href={instagram}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card-surface)] px-4 py-2.5 font-sans text-sm font-bold text-[var(--text-headline)] transition hover:brightness-95 active:scale-95"
+          >
+            <InstagramMark />
+            {instagramLabel}
+          </a>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        onClick={onEnterLobby}
+        className="mt-6 w-full shrink-0 rounded-2xl bg-[var(--btn-primary)] py-4 font-sans text-lg font-extrabold text-[var(--btn-text)] shadow-lg transition hover:brightness-95 active:scale-95"
+      >
+        {copy.playCta}
+      </button>
+    </section>
+  );
+}
+
+function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
+  const copy = tenantConfig.copy.landing;
+  const campaign = useCampaign();
+  const router = useRouter();
+  const { tenantId, player } = useDuel();
+  const [tab, setTab] = useState<LobbyTab>("games");
+  const brand = (campaign.brandName || tenantConfig.brand.name).trim();
+  const logoUrl =
+    resolveLogoUrl(campaign.logoUrl, tenantId) || tenantConfig.brand.logoUrl;
   const visible = featuredArcadeGames(campaign.enabledGames);
   const tabs: Array<[LobbyTab, string]> = [
     ["games", copy.tabs.games],
@@ -54,76 +120,22 @@ export function Landing() {
   ];
 
   return (
-    <section className="flex flex-col pb-2">
-      {!profile ? (
-        <div className="flex items-center gap-2 rounded-2xl border border-ink/15 bg-surface px-3 py-2.5">
-          <p className="min-w-0 flex-1 font-sans text-[12px] font-medium leading-snug text-muted">
-            {copy.loginBanner}
-          </p>
-          <button
-            type="button"
-            onClick={() => setAuthOpen(true)}
-            className="shrink-0 rounded-2xl bg-primary px-3 py-1.5 font-sans text-[11px] font-bold text-on-primary shadow-sm transition hover:brightness-95 active:scale-95"
-          >
-            {copy.loginCta}
-          </button>
-        </div>
-      ) : null}
-
-      <header className={`text-center ${profile ? "mt-1" : "mt-3"}`}>
-        <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-slate-100 bg-white p-1.5 shadow-sm">
-          {logoUrl ? (
-            <img
-              src={logoUrl}
-              alt={brand}
-              className="h-full w-full object-contain"
-            />
-          ) : (
-            <span className="font-sans text-[10px] font-black uppercase tracking-wide text-[var(--text-headline)]">
-              {brand.slice(0, 2)}
-            </span>
-          )}
-        </div>
-        <h1 className="font-sans text-xl font-black tracking-tight text-[var(--text-headline)]">
-          {brand}
-        </h1>
-        <p className="mt-0.5 text-[11px] font-bold uppercase tracking-widest text-[var(--text-body)]/70">
-          {copy.hallName}
-        </p>
-        {profile ? (
-          <span className="mt-1.5 inline-flex rounded-full border border-[var(--text-headline)]/15 bg-[var(--card-surface)] px-2.5 py-1 font-sans text-[11px] font-semibold text-[var(--text-headline)]">
-            {copy.welcomeBadge.replace("{name}", profile.name)}
-          </span>
-        ) : null}
+    <section className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-2">
+      <header className="flex w-full items-center justify-between gap-3 py-2">
+        <button
+          type="button"
+          onClick={onBackWelcome}
+          className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--card-surface)] text-[var(--text-headline)] transition hover:brightness-95 active:scale-95"
+          aria-label={copy.welcomeBack}
+        >
+          <ChevronLeft className="size-5" aria-hidden />
+        </button>
+        <BrandLogo src={logoUrl} alt={brand} size="header" />
       </header>
-      {google || instagram ? (
-        <div className="mt-2 flex items-center justify-center gap-2">
-          {google ? (
-            <a
-              href={google}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 border border-[var(--text-headline)]/20 text-[var(--text-headline)] hover:bg-[var(--card-surface)] text-xs font-semibold px-3.5 py-1.5 rounded-full transition"
-            >
-              <GoogleMark />
-              {copy.googleReviewChip}
-            </a>
-          ) : null}
-          {instagram ? (
-            <a
-              href={instagram}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 border border-[var(--text-headline)]/20 text-[var(--text-headline)] hover:bg-[var(--card-surface)] text-xs font-semibold px-3.5 py-1.5 rounded-full transition"
-            >
-              <InstagramMark />
-              {copy.instagramChip}
-            </a>
-          ) : null}
-        </div>
-      ) : null}
 
-      <div className="mt-3 rounded-full border border-ink/15 bg-surface p-1">
+      <RewardProgressBar compact />
+
+      <div className="rounded-full border border-[var(--border)] bg-[var(--card-surface)] p-1">
         <div className="grid grid-cols-3 gap-1">
           {tabs.map(([id, label]) => {
             const active = tab === id;
@@ -132,7 +144,7 @@ export function Landing() {
                 key={id}
                 type="button"
                 onClick={() => setTab(id)}
-                className={`rounded-full px-2 py-2 font-sans text-[12px] tracking-wide transition-colors ${
+                className={`min-h-12 rounded-full px-2 py-2 font-sans text-[12px] tracking-wide transition-colors ${
                   active
                     ? "bg-[var(--tab-active-bg)] font-extrabold text-[var(--tab-active-text)] shadow-sm"
                     : "font-medium text-[var(--text-body)]"
@@ -146,7 +158,7 @@ export function Landing() {
       </div>
 
       {tab === "games" ? (
-        <div className="-mx-5 mt-1 grid grid-cols-2 gap-3 px-4 pb-3 pt-2">
+        <div className="mt-1 grid grid-cols-2 gap-3 pb-3 pt-2">
           {visible.map((game) => {
             const { title, badge, caption } = arcadeGameCopy(game.id);
             return (
@@ -162,7 +174,7 @@ export function Landing() {
           })}
         </div>
       ) : tab === "events" ? (
-        <div className="space-y-4">
+        <div className="mt-3 space-y-4">
           <LoyaltyStampCard
             tenantId={tenantId}
             clientId={player.clientId}
@@ -184,23 +196,12 @@ export function Landing() {
           />
         </div>
       ) : (
-        <p className="mt-8 text-center font-sans text-sm font-medium text-muted">
+        <p className="mt-8 text-center font-sans text-sm font-medium text-[var(--text-body)]">
           {copy.surveysEmpty}
         </p>
       )}
 
-      <div className="mt-2">
-        <DeviceTestReset />
-      </div>
-
-      <CustomerAuthModal
-        open={authOpen}
-        onClose={() => setAuthOpen(false)}
-        onSaved={(next) => {
-          setProfile(next);
-          chooseIdentity({ nickname: next.name, avatar: player.avatar });
-        }}
-      />
+      <DeviceTestReset />
     </section>
   );
 }
@@ -266,7 +267,7 @@ function EventsRaceCard({
           {entries.map((entry) => (
             <li
               key={entry.clientId}
-              className="grid grid-cols-[2rem_1fr_auto] items-center gap-2 rounded-2xl border border-[var(--border)] bg-black/20 px-3 py-2"
+              className="grid grid-cols-[2rem_1fr_auto] items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--bg-canvas)] px-3 py-2"
             >
               <span className="flex items-center justify-center font-sans text-xs font-black tabular-nums text-[var(--text-headline)]">
                 {medals ? <RankMedal rank={entry.rank} /> : `#${entry.rank}`}
@@ -305,20 +306,26 @@ function RankMedal({ rank }: { rank: number }) {
   return <span>#{rank}</span>;
 }
 
-function GoogleMark() {
-  return (
-    <svg viewBox="0 0 24 24" className="size-3.5" aria-hidden>
-      <path
-        fill="currentColor"
-        d="M21.35 11.1H12.2v2.9h5.27c-.23 1.24-1.4 3.64-5.27 3.64-3.18 0-5.77-2.63-5.77-5.87s2.59-5.87 5.77-5.87c1.81 0 3.03.77 3.72 1.43l2.02-1.95C16.7 3.9 14.66 3 12.2 3 7.36 3 3.5 6.92 3.5 11.77S7.36 20.54 12.2 20.54c5.05 0 8.38-3.55 8.38-8.54 0-.57-.06-1-.13-.9Z"
-      />
-    </svg>
-  );
+function instagramHandleFromUrl(url: string): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    const skip = new Set(["p", "reel", "reels", "stories", "explore", "accounts"]);
+    const handle = parsed.pathname
+      .split("/")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .find((part) => !skip.has(part.toLowerCase()));
+    if (!handle) return null;
+    return handle.replace(/^@/, "");
+  } catch {
+    return null;
+  }
 }
 
 function InstagramMark() {
   return (
-    <svg viewBox="0 0 24 24" className="size-3.5" fill="none" aria-hidden>
+    <svg viewBox="0 0 24 24" className="size-4" fill="none" aria-hidden>
       <rect
         x="3.25"
         y="3.25"
@@ -333,4 +340,3 @@ function InstagramMark() {
     </svg>
   );
 }
-
