@@ -6,7 +6,6 @@ import { getActiveTenantId } from "@/lib/campaignState";
 import { updateSession } from "@/lib/session";
 import {
   logoFrameClass,
-  logoImageClass,
   resolveLogoShape,
   resolveLogoUrl,
 } from "@/lib/tenant";
@@ -33,14 +32,14 @@ export function BrandWordmark({
   const logoUrl = resolveLogoUrl(campaign.logoUrl, tenantId);
   const shape = resolveLogoShape(campaign.themeConfig?.logo_shape, tenantId);
   const frameClass = compact
-    ? "flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-100 bg-white p-2 shadow-xs"
+    ? logoFrameClass(shape, "compact")
     : logoFrameClass(shape, "hero");
 
   const image = logoUrl ? (
     <img
       src={logoUrl}
       alt={name}
-      className={compact ? "h-full w-full object-contain" : logoImageClass(shape)}
+      className="h-full w-full object-contain"
     />
   ) : name ? (
     <p

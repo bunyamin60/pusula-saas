@@ -16,7 +16,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: tenantConfig.brand.wordmark,
-    statusBarStyle: "default",
+    statusBarStyle: "black-translucent",
   },
   formatDetection: {
     telephone: false,
@@ -35,10 +35,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="tr"
-      className={`${sans.variable} h-full antialiased`}
-    >
+    <html lang="tr" className={`${sans.variable} h-full antialiased`}>
       <head>
         <style dangerouslySetInnerHTML={{ __html: buildThemeCss() }} />
       </head>

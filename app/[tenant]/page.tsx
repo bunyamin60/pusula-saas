@@ -1,38 +1,76 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { GuestDock } from "@/components/GuestDock";
 import { GuestProviders } from "@/components/GuestProviders";
-import { RewardProgressBar } from "@/components/RewardProgressBar";
 import { Landing } from "@/components/Landing";
+import { PhoneShell } from "@/components/PhoneShell";
+import { logCampaignEvent } from "@/lib/analytics";
 import { getActiveTenantId } from "@/lib/campaignState";
 import { useCampaign } from "@/lib/useCampaign";
+import {
+  readVenueHomeView,
+  writeVenueHomeView,
+  type VenueHomeView,
+} from "@/lib/venueHome";
+
+function historyView(state: unknown): VenueHomeView {
+  return state &&
+    typeof state === "object" &&
+    "venueHome" in state &&
+    (state as { venueHome: VenueHomeView }).venueHome === "lobby"
+    ? "lobby"
+    : "welcome";
+}
 
 export default function TenantHome() {
   const campaign = useCampaign();
   const params = useParams<{ tenant?: string }>();
   const tenantId = params.tenant ?? getActiveTenantId();
+  const [view, setView] = useState<VenueHomeView>("welcome");
+
+  useEffect(() => {
+    const next = readVenueHomeView(tenantId);
+    setView(next);
+    window.history.replaceState({ venueHome: next }, "");
+    function onPop(event: PopStateEvent) {
+      const popped = historyView(event.state);
+      writeVenueHomeView(tenantId, popped);
+      setView(popped);
+    }
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [tenantId]);
+
+  function enterLobby() {
+    writeVenueHomeView(tenantId, "lobby");
+    window.history.pushState({ venueHome: "lobby" }, "");
+    setView("lobby");
+    void logCampaignEvent(tenantId, "home_cta");
+  }
+
+  function backWelcome() {
+    if (historyView(window.history.state) === "lobby") {
+      window.history.back();
+      return;
+    }
+    writeVenueHomeView(tenantId, "welcome");
+    window.history.replaceState({ venueHome: "welcome" }, "");
+    setView("welcome");
+  }
 
   return (
     <GuestProviders tenantId={tenantId}>
-      <Shell>
-        <RewardProgressBar compact />
-        <Landing />
-        <GuestDock />
+      <PhoneShell paddedBottom={view === "lobby"}>
+        <Landing
+          view={view}
+          onEnterLobby={enterLobby}
+          onBackWelcome={backWelcome}
+        />
+        {view === "lobby" ? <GuestDock /> : null}
         <span className="sr-only">{campaign.brandName}</span>
-      </Shell>
+      </PhoneShell>
     </GuestProviders>
-  );
-}
-
-function Shell({ children }: { children: ReactNode }) {
-  return (
-    <main
-      className="mx-auto flex min-h-dvh w-full max-w-md flex-col overflow-x-hidden bg-background px-5 pt-[max(1rem,env(safe-area-inset-top))]"
-      style={{ paddingBottom: "calc(5.5rem + env(safe-area-inset-bottom))" }}
-    >
-      {children}
-    </main>
   );
 }

@@ -141,7 +141,7 @@ export function RewardClaimModal() {
                 type="button"
                 onClick={closeClaim}
                 aria-label={copy.close}
-                className="flex size-10 items-center justify-center rounded-full border-2 border-ink/20 bg-background text-ink"
+                className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-full border-2 border-ink/20 bg-background text-ink"
               >
                 <X className="size-4" />
               </button>

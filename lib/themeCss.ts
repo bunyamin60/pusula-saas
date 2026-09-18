@@ -24,6 +24,7 @@ export function themeVarEntries(
     ["--card-bg", theme.surface],
     ["--accent", theme.primaryHover],
     ["--bg-canvas", theme.background],
+    ["--logo-well", "#fffffe"],
     ["--text-headline", theme.textDark],
     ["--text-body", theme.textMuted],
     ["--btn-primary", theme.primary],
@@ -57,6 +58,13 @@ export function buildThemeCss(theme: ThemeTokens = tenantConfig.theme): string {
 
 export function applyThemeTokens(theme: ThemeTokens): void {
   if (typeof document === "undefined") return;
+  document.getElementById("arada-theme-boot")?.remove();
+  try {
+    window.localStorage.removeItem("arada_theme_css");
+    window.localStorage.removeItem("arada_theme_vars");
+  } catch {
+    // Ignore storage access in private browsing.
+  }
   const root = document.documentElement;
   root.style.colorScheme = isDarkHex(theme.background) ? "dark" : "light";
   themeVarEntries(theme).forEach(([key, value]) => {

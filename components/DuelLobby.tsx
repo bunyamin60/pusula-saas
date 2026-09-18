@@ -163,7 +163,7 @@ export function DuelLobbyDrawer({
             type="button"
             onClick={onClose}
             aria-label={copy.close}
-            className="flex size-10 items-center justify-center rounded-full bg-surface text-ink"
+            className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-full bg-surface text-ink"
           >
             <X className="size-4" />
           </button>
@@ -337,7 +337,7 @@ function NicknamePicker({
             type="button"
             onClick={onClose}
             aria-label={copy.close}
-            className="flex size-10 shrink-0 items-center justify-center rounded-full bg-surface text-ink"
+            className="inline-flex min-h-12 min-w-12 shrink-0 items-center justify-center rounded-full bg-surface text-ink"
           >
             <X className="size-4" />
           </button>

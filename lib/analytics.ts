@@ -3,7 +3,10 @@ import { getSupabase } from "@/lib/supabase";
 export type CampaignEventName =
   | "quiz_complete"
   | "google_click"
-  | "reward_redeemed";
+  | "reward_redeemed"
+  | "session_start"
+  | "home_cta"
+  | "error_shown";
 
 export type CampaignStatsRange = "today" | "all";
 

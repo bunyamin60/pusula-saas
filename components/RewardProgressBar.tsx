@@ -7,9 +7,13 @@ import { formatPlayClock } from "@/lib/playReward";
 
 type RewardProgressBarProps = {
   compact?: boolean;
+  embedded?: boolean;
 };
 
-export function RewardProgressBar({ compact = false }: RewardProgressBarProps) {
+export function RewardProgressBar({
+  compact = false,
+  embedded = false,
+}: RewardProgressBarProps) {
   const copy = tenantConfig.copy.playReward;
   const {
     progress,
@@ -42,48 +46,57 @@ export function RewardProgressBar({ compact = false }: RewardProgressBarProps) {
   const fill = `${Math.round(progress * 1000) / 10}%`;
   const elapsedClock = formatPlayClock(elapsedSeconds);
 
+  const shellClass = embedded
+    ? "relative mt-4 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-canvas)] p-2.5"
+    : compact
+      ? "relative mb-3 shrink-0 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-canvas)] p-2.5 shadow-sm"
+      : "relative mb-3 shrink-0 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-canvas)] px-3 py-2";
+
   if (isUnlocked) {
-    return (
-      <>
-        <div className="h-16 shrink-0" aria-hidden />
-        <div className="fixed top-3 inset-x-4 z-40 mx-auto flex max-w-md items-center justify-between rounded-2xl bg-primary/95 p-3 shadow-md backdrop-blur-md">
-          {burst ? <ConfettiBurst /> : null}
-          <p className="min-w-0 truncate pr-3 font-sans text-sm font-bold text-on-primary">
-            {compact ? copy.readyCtaShort : copy.readyCta}
-          </p>
-          <button
-            type="button"
-            onClick={openClaim}
-            className="shrink-0 rounded-xl bg-ink px-3 py-2 font-sans text-xs font-bold text-background transition hover:opacity-90 active:scale-95"
-          >
-            {copy.readyOpen}
-          </button>
-        </div>
-      </>
+    const readyBar = (
+      <div
+        className={
+          embedded || compact
+            ? "relative mt-0 mb-3 flex items-center justify-between rounded-2xl bg-[var(--btn-primary)] p-3"
+            : "relative mb-3 flex items-center justify-between rounded-2xl bg-[var(--btn-primary)] p-3 shadow-md"
+        }
+      >
+        {burst ? <ConfettiBurst /> : null}
+        <p className="min-w-0 truncate pr-3 font-sans text-sm font-bold text-[var(--btn-text)]">
+          {compact || embedded ? copy.readyCtaShort : copy.readyCta}
+        </p>
+        <button
+          type="button"
+          onClick={openClaim}
+          className="shrink-0 rounded-xl bg-[var(--bg-canvas)] px-3 py-2 font-sans text-xs font-bold text-[var(--text-headline)] transition hover:brightness-95 active:scale-95"
+        >
+          {copy.readyOpen}
+        </button>
+      </div>
     );
+    return readyBar;
   }
 
-  if (compact) {
+  if (compact || embedded) {
     return (
-      <div className="relative mb-3 shrink-0 overflow-hidden rounded-2xl border border-ink/10 bg-background/80 p-2.5 shadow-sm backdrop-blur-md">
+      <div className={shellClass}>
         <div className="flex items-center gap-2.5">
-          <p className="min-w-0 flex-1 truncate font-sans text-[11px] font-medium tracking-wide text-muted">
+          <p className="min-w-0 flex-1 truncate text-left font-sans text-[11px] font-medium tracking-wide text-[var(--text-body)]">
             {copy.barLabel}
           </p>
           <div className="flex shrink-0 items-center gap-2">
-            <div className="h-1.5 w-14 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-1.5 w-14 overflow-hidden rounded-full bg-[var(--text-headline)]/10">
               <div
-                className="h-full rounded-full transition-[width] duration-500 ease-out"
+                className="h-full rounded-full bg-[var(--btn-primary)] transition-[width] duration-500 ease-out"
                 style={{
                   width: fill,
-                  background: "var(--btn-primary)",
                   opacity: isPaused ? 0.55 : 1,
                 }}
               />
             </div>
             <p
               suppressHydrationWarning
-              className="font-sans text-[11px] font-semibold tabular-nums text-ink"
+              className="font-sans text-[11px] font-semibold tabular-nums text-[var(--text-headline)]"
             >
               {elapsedClock}
             </p>
@@ -94,19 +107,19 @@ export function RewardProgressBar({ compact = false }: RewardProgressBarProps) {
   }
 
   return (
-    <div className="relative mb-3 shrink-0 overflow-hidden rounded-2xl border border-ink/10 bg-background/80 px-3 py-2">
+    <div className={shellClass}>
       <div className="flex items-center gap-2">
-        <p className="min-w-0 flex-1 truncate font-sans text-[11px] font-medium tracking-wide text-muted">
+        <p className="min-w-0 flex-1 truncate font-sans text-[11px] font-medium tracking-wide text-[var(--text-body)]">
           {isPaused ? pausedLabel : copy.barLabel}
         </p>
-        <p className="shrink-0 font-sans text-xs font-semibold tabular-nums text-ink">
+        <p className="shrink-0 font-sans text-xs font-semibold tabular-nums text-[var(--text-headline)]">
           {clockLabel}
         </p>
       </div>
-      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--text-headline)]/10">
         <div
-          className="h-full rounded-full transition-[width] duration-500 ease-out"
-          style={{ width: fill, background: "var(--btn-primary)" }}
+          className="h-full rounded-full bg-[var(--btn-primary)] transition-[width] duration-500 ease-out"
+          style={{ width: fill }}
         />
       </div>
     </div>

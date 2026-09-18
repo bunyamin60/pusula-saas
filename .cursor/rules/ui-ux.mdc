@@ -1,0 +1,12 @@
+---
+description: Mobil Arcade UI/UX ve Anti-AI Tasarım Standartları
+globs: app/**/*.{tsx,ts,jsx,js},components/**/*.{tsx,ts,jsx,js}
+alwaysApply: true
+---
+- **Anti-AI Görsel Kimliği:** Jenerik yapay zekâ şablonu hissi veren klişeleri kullanma. Başlıkların yanına anlamsız parıltı/roket/yıldız ikonları, her tarafı saran soluk pastel kutucuklar veya içi boş dekoratif süsler ekleme.
+- **Dokunsallık (Tactile Feedback):** Arayüz bir mobil oyun salonudur. Tıklanabilir tüm elemanlar basma hissi vermeli (`active:scale-95 transition-transform active:brightness-95`).
+- **Mobil Dokunma Ergonomisi:** Butonlar ve etkileşim alanları parmak için en az 48px dokunma yüksekliğine (`min-h-[48px]`) sahip olmalı.
+- **Ekran Kabuğu (Shell Standardı):** Mobil öncelikli PWA düzenini koru. Dış kapsayıcılarda `max-w-md mx-auto min-h-[100dvh]` kullanarak sayfanın masaüstünde ortalı, telefonda tam ekran durmasını sağla. Sağa-sola kaçan kontrolsüz flex/grid düzenleri kurma.
+- **iOS Safe Area & Viewport:** `h-screen` yerine her zaman `100dvh` kullan. Çentik ve Safari barı çakışmalarını önlemek için `env(safe-area-inset-top)` ve `env(safe-area-inset-bottom)` boşluklarını gözet.
+- **Logo ve Görsel Yerleşimi:** Marka logolarını kutuya sıkıştırma veya ezme; daima temiz bir arka plan üzerinde `object-contain` ve yeterli iç boşluk (padding) ile ortala.
+- **Tema Motoruna Sadakat:** .cursor/rules/tema.mdc kuralına birebir uy; asla statik renk (bg-blue-500, #hex vb.) yazma, tüm renk ve stilleri CSS değişkenlerinden (`var(--...)`) dinamik al.

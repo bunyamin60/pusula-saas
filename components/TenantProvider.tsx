@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, type ReactNode } from "react";
+import { PwaRuntime } from "@/components/PwaRuntime";
 import { SeededCampaignContext } from "@/lib/useCampaign";
 import {
   bindTenant,
@@ -25,12 +26,12 @@ export function TenantProvider({
 }: TenantProviderProps) {
   if (typeof window !== "undefined") {
     primeTenant(tenantId, initial);
-    bindSessionTenant(tenantId);
   }
 
   return (
     <SeededCampaignContext.Provider value={initial}>
       <TenantThemeSync tenantId={tenantId} initial={initial} />
+      <PwaRuntime tenantId={tenantId} />
       {children}
     </SeededCampaignContext.Provider>
   );
@@ -46,6 +47,7 @@ function TenantThemeSync({
   const campaign = useCampaign();
 
   useLayoutEffect(() => {
+    bindSessionTenant(tenantId);
     bindTenant(tenantId, initial);
   }, [tenantId, initial]);
 
