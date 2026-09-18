@@ -42,12 +42,10 @@ export function Landing({
       )}
       <style>{`
         @keyframes venueEnter {
-          from { opacity: 0; transform: translateY(16px); }
+          from { opacity: 0; transform: translateY(12px); }
           to { opacity: 1; transform: translateY(0); }
         }
-        .venue-enter {
-          animation: venueEnter 320ms ease-out;
-        }
+        .venue-enter { animation: venueEnter 280ms ease-out; }
       `}</style>
     </div>
   );
@@ -97,7 +95,7 @@ function WelcomeScreen({ onEnterLobby }: { onEnterLobby: () => void }) {
       <button
         type="button"
         onClick={onEnterLobby}
-        className="mt-6 w-full shrink-0 rounded-2xl bg-[var(--btn-primary)] py-4 font-sans text-lg font-bold text-[var(--btn-text)] shadow-lg transition hover:brightness-95 active:scale-95"
+        className="mt-6 w-full shrink-0 rounded-2xl bg-[var(--btn-primary)] py-4 font-sans text-lg font-extrabold text-[var(--btn-text)] shadow-lg transition hover:brightness-95 active:scale-95"
       >
         {copy.playCta}
       </button>
@@ -135,9 +133,7 @@ function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
         <BrandLogo src={logoUrl} alt={brand} size="header" />
       </header>
 
-      <div className="mt-3">
-        <RewardProgressBar compact />
-      </div>
+      <RewardProgressBar compact />
 
       <div className="rounded-full border border-[var(--border)] bg-[var(--card-surface)] p-1">
         <div className="grid grid-cols-3 gap-1">
@@ -273,7 +269,7 @@ function EventsRaceCard({
           {entries.map((entry) => (
             <li
               key={entry.clientId}
-              className="grid grid-cols-[2rem_1fr_auto] items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--text-headline)]/10 px-3 py-2"
+              className="grid grid-cols-[2rem_1fr_auto] items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--bg-canvas)] px-3 py-2"
             >
               <span className="flex items-center justify-center font-sans text-xs font-black tabular-nums text-[var(--text-headline)]">
                 {medals ? <RankMedal rank={entry.rank} /> : `#${entry.rank}`}
@@ -313,6 +309,7 @@ function RankMedal({ rank }: { rank: number }) {
 }
 
 function instagramHandleFromUrl(url: string): string | null {
+  if (!url) return null;
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.replace(/^www\./i, "").toLowerCase();
