@@ -1,4 +1,8 @@
 import { writeCustomerProfile, type CustomerProfile } from "@/lib/customerProfile";
+import {
+  defaultGuestAvatarUrl,
+  isGuestAvatarUrl,
+} from "@/lib/guestAvatars";
 import { getSupabase } from "@/lib/supabase";
 import {
   readStampCard,
@@ -11,6 +15,7 @@ export type GuestAuthInput = {
   clientId: string;
   nickname: string;
   pin: string;
+  avatarUrl?: string | null;
 };
 
 export type GuestAuthResult =
@@ -24,11 +29,12 @@ type CustomerRow = {
   pin_code: string | null;
   stamp_count: number | null;
   last_coupon_code: string | null;
+  avatar_url: string | null;
 };
 
 const NICKNAME_MAX = 15;
 const CUSTOMER_COLS =
-  "tenant_id, client_id, nickname, pin_code, stamp_count, last_coupon_code";
+  "tenant_id, client_id, nickname, pin_code, stamp_count, last_coupon_code, avatar_url";
 
 export function normalizeNickname(raw: string): string {
   return raw.trim().slice(0, NICKNAME_MAX);
@@ -40,6 +46,10 @@ export function normalizePin(raw: string): string {
 
 export function isValidPin(pin: string): boolean {
   return /^\d{4}$/.test(pin);
+}
+
+function resolveAvatarUrl(raw: string | null | undefined): string {
+  return isGuestAvatarUrl(raw) ? raw : defaultGuestAvatarUrl();
 }
 
 function clampStamp(value: unknown): number {
@@ -74,11 +84,12 @@ function sealSession(
   clientId: string,
   nickname: string,
   stamps: StampCardState,
+  avatarUrl: string,
 ): GuestAuthResult {
   writeStampCard(tenantId, clientId, stamps);
   return {
     ok: true,
-    profile: writeCustomerProfile({ name: nickname }),
+    profile: writeCustomerProfile({ name: nickname, avatarUrl }),
     stamps,
   };
 }
@@ -142,6 +153,7 @@ async function loginExisting(
   input: GuestAuthInput,
   nickname: string,
   pin: string,
+  avatarUrl: string,
 ): Promise<GuestAuthResult> {
   const supabase = getSupabase();
   if (!supabase) return { ok: false, reason: "offline" };
@@ -160,37 +172,32 @@ async function loginExisting(
     }
   }
 
+  const patch = {
+    client_id: input.clientId,
+    nickname,
+    pin_code: pin,
+    avatar_url: avatarUrl,
+    stamp_count: stamps.count,
+    last_coupon_code: stamps.lastCode,
+    updated_at: new Date().toISOString(),
+  };
+
   const { error } = await supabase
     .from("customers")
-    .update({
-      client_id: input.clientId,
-      nickname,
-      pin_code: pin,
-      stamp_count: stamps.count,
-      last_coupon_code: stamps.lastCode,
-      updated_at: new Date().toISOString(),
-    })
+    .update(patch)
     .eq("tenant_id", input.tenantId)
     .eq("client_id", row.client_id);
 
-  // If client_id already moved (same device), match by nickname instead.
   if (error) {
     const { error: byNickError } = await supabase
       .from("customers")
-      .update({
-        client_id: input.clientId,
-        nickname,
-        pin_code: pin,
-        stamp_count: stamps.count,
-        last_coupon_code: stamps.lastCode,
-        updated_at: new Date().toISOString(),
-      })
+      .update(patch)
       .eq("tenant_id", input.tenantId)
       .eq("nickname", row.nickname);
     if (byNickError) return { ok: false, reason: "offline" };
   }
 
-  return sealSession(input.tenantId, input.clientId, nickname, stamps);
+  return sealSession(input.tenantId, input.clientId, nickname, stamps, avatarUrl);
 }
 
 /**
@@ -202,6 +209,7 @@ export async function signInWithNicknamePin(
 ): Promise<GuestAuthResult> {
   const nickname = normalizeNickname(input.nickname);
   const pin = normalizePin(input.pin);
+  const avatarUrl = resolveAvatarUrl(input.avatarUrl);
   if (!input.tenantId || !input.clientId || !nickname || !isValidPin(pin)) {
     return { ok: false, reason: "invalid" };
   }
@@ -215,7 +223,7 @@ export async function signInWithNicknamePin(
     const byNick = await findByNickname(input.tenantId, nickname);
     if (byNick.error) return { ok: false, reason: "offline" };
     if (byNick.row) {
-      return loginExisting(byNick.row, input, nickname, pin);
+      return loginExisting(byNick.row, input, nickname, pin, avatarUrl);
     }
 
     const byClient = await findByClientId(input.tenantId, input.clientId);
@@ -228,6 +236,7 @@ export async function signInWithNicknamePin(
         .update({
           nickname,
           pin_code: pin,
+          avatar_url: avatarUrl,
           stamp_count: stamps.count,
           last_coupon_code: stamps.lastCode,
           updated_at: new Date().toISOString(),
@@ -238,13 +247,15 @@ export async function signInWithNicknamePin(
       if (error) {
         if (error.code === "23505") {
           const again = await findByNickname(input.tenantId, nickname);
-          if (again.row) return loginExisting(again.row, input, nickname, pin);
+          if (again.row) {
+            return loginExisting(again.row, input, nickname, pin, avatarUrl);
+          }
           return { ok: false, reason: "taken" };
         }
         return { ok: false, reason: "offline" };
       }
 
-      return sealSession(input.tenantId, input.clientId, nickname, stamps);
+      return sealSession(input.tenantId, input.clientId, nickname, stamps, avatarUrl);
     }
 
     const stamps = writeStampCard(input.tenantId, input.clientId, local);
@@ -253,6 +264,7 @@ export async function signInWithNicknamePin(
       client_id: input.clientId,
       nickname,
       pin_code: pin,
+      avatar_url: avatarUrl,
       stamp_count: stamps.count,
       last_coupon_code: stamps.lastCode,
       updated_at: new Date().toISOString(),
@@ -261,7 +273,9 @@ export async function signInWithNicknamePin(
     if (insertError) {
       if (insertError.code === "23505") {
         const again = await findByNickname(input.tenantId, nickname);
-        if (again.row) return loginExisting(again.row, input, nickname, pin);
+        if (again.row) {
+          return loginExisting(again.row, input, nickname, pin, avatarUrl);
+        }
         const device = await findByClientId(input.tenantId, input.clientId);
         if (device.row) {
           const merged = mergeStamps(input.tenantId, input.clientId, device.row);
@@ -270,6 +284,7 @@ export async function signInWithNicknamePin(
             .update({
               nickname,
               pin_code: pin,
+              avatar_url: avatarUrl,
               stamp_count: merged.count,
               last_coupon_code: merged.lastCode,
               updated_at: new Date().toISOString(),
@@ -277,7 +292,13 @@ export async function signInWithNicknamePin(
             .eq("tenant_id", input.tenantId)
             .eq("client_id", input.clientId);
           if (!patchError) {
-            return sealSession(input.tenantId, input.clientId, nickname, merged);
+            return sealSession(
+              input.tenantId,
+              input.clientId,
+              nickname,
+              merged,
+              avatarUrl,
+            );
           }
           return { ok: false, reason: "taken" };
         }
@@ -286,7 +307,7 @@ export async function signInWithNicknamePin(
       return { ok: false, reason: "offline" };
     }
 
-    return sealSession(input.tenantId, input.clientId, nickname, stamps);
+    return sealSession(input.tenantId, input.clientId, nickname, stamps, avatarUrl);
   } catch {
     return { ok: false, reason: "offline" };
   }

@@ -11,6 +11,11 @@ import { WhoAmIGame } from "@/components/WhoAmIGame";
 import { tenantConfig } from "@/config/tenant.config";
 import { clearArcadeGameSession } from "@/lib/arcadeSession";
 import { beginPlaySession, endPlaySession, formatPlayClock } from "@/lib/playReward";
+import {
+  endVenueTableGame,
+  getActiveTableLabel,
+  startVenueTableGame,
+} from "@/lib/tableSession";
 import { writeVenueHomeView } from "@/lib/venueHome";
 
 type ActiveGameId = "taboo" | "whoami" | "blockblast";
@@ -22,6 +27,8 @@ type GameContainerProps = {
   overlay?: boolean;
   containerRef?: RefObject<HTMLDivElement | null>;
   activeGame?: ActiveGameId;
+  /** Soft game key written to table_sessions for admin live view. */
+  sessionGame?: string;
 };
 
 export function GameContainer({
@@ -31,11 +38,11 @@ export function GameContainer({
   overlay = false,
   containerRef,
   activeGame,
+  sessionGame,
 }: GameContainerProps) {
   const shell = tenantConfig.copy.landing.gameShell;
-  const table =
-    tenantConfig.brand.tableName.trim() || shell.tableFallback;
-  const { tenantId } = useDuel();
+  const { tenantId, player } = useDuel();
+  const table = getActiveTableLabel(tenantId) || shell.tableFallback;
   const { elapsedSeconds } = usePlayReward();
   const clock = formatPlayClock(elapsedSeconds);
   const [mounted, setMounted] = useState(false);
@@ -47,8 +54,17 @@ export function GameContainer({
 
   useEffect(() => {
     beginPlaySession();
-    return () => endPlaySession();
-  }, []);
+    const gameType = sessionGame ?? activeGame ?? "arcade";
+    void startVenueTableGame({
+      tenantId,
+      clientId: player.clientId,
+      gameType,
+    });
+    return () => {
+      endPlaySession();
+      void endVenueTableGame({ tenantId, clientId: player.clientId });
+    };
+  }, [activeGame, player.clientId, sessionGame, tenantId]);
 
   function wipeActiveGame() {
     if (

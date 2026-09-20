@@ -5,14 +5,20 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
 import { useDuel } from "@/components/DuelProvider";
+import { GuestAvatarImage } from "@/components/GuestAvatarImage";
 import { tenantConfig } from "@/config/tenant.config";
+import type { CustomerProfile } from "@/lib/customerProfile";
+import {
+  defaultGuestAvatarUrl,
+  GUEST_AVATAR_OPTIONS,
+  type GuestAvatarUrl,
+} from "@/lib/guestAvatars";
 import {
   isValidPin,
   normalizeNickname,
   normalizePin,
   signInWithNicknamePin,
 } from "@/lib/guestAuth";
-import type { CustomerProfile } from "@/lib/customerProfile";
 
 type CustomerAuthModalProps = {
   open: boolean;
@@ -29,6 +35,7 @@ export function CustomerAuthModal({
   const { tenantId, player, chooseIdentity } = useDuel();
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState<GuestAvatarUrl>(defaultGuestAvatarUrl());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -39,6 +46,7 @@ export function CustomerAuthModal({
     if (!open) return;
     setError(null);
     setBusy(false);
+    setAvatarUrl(defaultGuestAvatarUrl());
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
@@ -62,6 +70,7 @@ export function CustomerAuthModal({
       clientId: player.clientId,
       nickname,
       pin: nextPin,
+      avatarUrl,
     });
     setBusy(false);
 
@@ -89,6 +98,7 @@ export function CustomerAuthModal({
     onSaved(result.profile);
     setName("");
     setPin("");
+    setAvatarUrl(defaultGuestAvatarUrl());
     onClose();
   }
 
@@ -137,6 +147,34 @@ export function CustomerAuthModal({
               </button>
             </div>
             <form onSubmit={(event) => void submit(event)} className="mt-5 space-y-3">
+              <div>
+                <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-body)]">
+                  {copy.authAvatar}
+                </p>
+                <div className="hide-scrollbar mt-2 flex gap-4 overflow-x-auto px-1 pb-2 pt-1.5 snap-x snap-mandatory">
+                  {GUEST_AVATAR_OPTIONS.map((src) => {
+                    const selected = avatarUrl === src;
+                    return (
+                      <button
+                        key={src}
+                        type="button"
+                        onClick={() => setAvatarUrl(src)}
+                        aria-pressed={selected}
+                        aria-label={copy.authAvatar}
+                        className={`relative size-16 shrink-0 snap-center rounded-full transition-transform active:scale-95 ${
+                          selected
+                            ? "ring-4 ring-[var(--btn-primary)] ring-offset-2 ring-offset-[var(--bg-canvas)]"
+                            : "ring-2 ring-[var(--border)] ring-offset-2 ring-offset-[var(--bg-canvas)]"
+                        }`}
+                      >
+                        <span className="absolute inset-0 overflow-hidden rounded-full bg-[var(--card-surface)]">
+                          <GuestAvatarImage src={src} sizes="64px" />
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <label className="block">
                 <span className="font-sans text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-body)]">
                   {copy.authName}

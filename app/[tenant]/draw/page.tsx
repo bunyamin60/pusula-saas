@@ -38,6 +38,7 @@ function DrawBoot({ tenantId }: { tenantId: string }) {
   return (
     <GameContainer
       title={tenantConfig.copy.duel.draw.title}
+      sessionGame="draw"
       onBack={() => router.push(`/${tenantId}`)}
     >
       <DrawGate tenantId={tenantId} onJoin={joinDrawRoom} />

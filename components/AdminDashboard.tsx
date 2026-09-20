@@ -40,9 +40,13 @@ import {
   writeActiveThemeId,
 } from "@/lib/tenant";
 import { applyThemeTokens } from "@/lib/themeCss";
+import {
+  fetchActiveTableSessions,
+  type LiveTableSession,
+} from "@/lib/tableSession";
 import { useCampaign } from "@/lib/useCampaign";
 
-type DeskTab = "kasa" | "venue" | "gossip" | "metrics";
+type DeskTab = "kasa" | "venue" | "gossip" | "metrics" | "tables";
 
 const DESK_GAMES: CatalogGameId[] = [
   "draw",
@@ -88,10 +92,11 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
             </button>
           </div>
         </div>
-        <div className="mt-3 grid grid-cols-4 gap-1 rounded-2xl border border-[var(--text-headline)]/10 bg-[var(--bg-canvas)] p-1.5">
+        <div className="mt-3 grid grid-cols-5 gap-1 rounded-2xl border border-[var(--text-headline)]/10 bg-[var(--bg-canvas)] p-1.5">
           {(
             [
               ["kasa", desk.tabs.kasa],
+              ["tables", desk.tabs.tables],
               ["venue", desk.tabs.venue],
               ["gossip", desk.tabs.gossip],
               ["metrics", desk.tabs.metrics],
@@ -103,7 +108,7 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
                 key={id}
                 type="button"
                 onClick={() => setTab(id)}
-                className={`w-full rounded-xl px-2 py-2 text-[11px] leading-tight transition-all ${
+                className={`min-h-12 w-full rounded-xl px-1 py-2 text-[10px] leading-tight transition-all sm:text-[11px] ${
                   active
                     ? "bg-[var(--btn-primary)] font-extrabold text-[var(--btn-text)] shadow-sm"
                     : "font-semibold text-[var(--text-body)]"
@@ -118,11 +123,89 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 
       <div className="flex-1 px-5 py-5">
         {tab === "kasa" ? <KasaTab tenantId={tenantId} /> : null}
+        {tab === "tables" ? <TablesTab tenantId={tenantId} /> : null}
         {tab === "venue" ? <VenueTab /> : null}
         {tab === "gossip" ? <GossipTab tenantId={tenantId} /> : null}
         {tab === "metrics" ? <MetricsTab tenantId={tenantId} /> : null}
       </div>
     </main>
+  );
+}
+
+function TablesTab({ tenantId }: { tenantId: string }) {
+  const copy = tenantConfig.copy.desk.tables;
+  const [rows, setRows] = useState<LiveTableSession[] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setBusy(true);
+    const next = await fetchActiveTableSessions(tenantId);
+    setRows(next);
+    setBusy(false);
+  }, [tenantId]);
+
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => void load(), 8_000);
+    return () => window.clearInterval(timer);
+  }, [load]);
+
+  return (
+    <section className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <p className="font-sans text-sm font-medium text-[var(--text-body)]">
+          {copy.lead}
+        </p>
+        <button
+          type="button"
+          onClick={() => void load()}
+          disabled={busy}
+          className="inline-flex min-h-12 shrink-0 items-center rounded-xl border border-[var(--border)] bg-[var(--card-surface)] px-3 font-sans text-xs font-bold text-[var(--text-headline)] transition active:scale-95 disabled:opacity-50"
+        >
+          {copy.refresh}
+        </button>
+      </div>
+      {rows == null ? (
+        <p className="font-sans text-sm font-medium text-[var(--text-body)]">
+          …
+        </p>
+      ) : rows.length === 0 ? (
+        <p className="rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-4 py-5 font-sans text-sm font-medium text-[var(--text-body)]">
+          {copy.empty}
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {rows.map((row) => (
+            <li
+              key={row.sessionId}
+              className="rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-4 py-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-sans text-base font-extrabold text-[var(--text-headline)]">
+                  {row.tableLabel}
+                </p>
+                <p className="font-sans text-xs font-bold text-[var(--text-body)]">
+                  {row.nickname || "—"}
+                </p>
+              </div>
+              <p className="mt-1 font-sans text-sm font-medium text-[var(--text-body)]">
+                {row.gameType
+                  ? copy.playing
+                      .replace("{game}", row.gameType)
+                      .replace(
+                        "{minutes}",
+                        String(row.minutesInGame ?? 0),
+                      )
+                  : copy.seated.replace(
+                      "{minutes}",
+                      String(row.minutesAtTable),
+                    )}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import confetti from "canvas-confetti";
 import { Target, Trophy } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useDuel } from "@/components/DuelProvider";
 import { tenantConfig } from "@/config/tenant.config";
 import {
@@ -27,8 +28,13 @@ import {
   type Board,
 } from "@/lib/blockShapes";
 import { readCustomerProfile } from "@/lib/customerProfile";
-import { submitQuizScore } from "@/lib/duelLeaderboard";
+import {
+  submitQuizScore,
+  type QuizLeaderboardEntry,
+} from "@/lib/duelLeaderboard";
 import { confirmStampVisit } from "@/lib/stampCard";
+import { getActiveTableLabel } from "@/lib/tableSession";
+import { writeLobbyTab, writeVenueHomeView } from "@/lib/venueHome";
 
 const FINGER_LIFT = 50;
 const CLEAR_MS = 300;
@@ -233,12 +239,12 @@ function writeSession(tenantId: string, session: BlastSession): void {
   }
 }
 
-function scoreNickname(): string {
+function scoreNickname(tenantId: string): string {
   const profile = readCustomerProfile();
   if (profile?.name) return profile.name;
   return tenantConfig.copy.duel.guestPlayer.replace(
     "{table}",
-    tenantConfig.brand.tableName,
+    getActiveTableLabel(tenantId),
   );
 }
 
@@ -250,6 +256,7 @@ export function BlockBlastGame({
   onReset: () => void;
 }) {
   const copy = tenantConfig.copy.blockblast;
+  const router = useRouter();
   const { tenantId, player } = useDuel();
   const [session, setSession] = useState<BlastSession | null>(null);
   const [high, setHigh] = useState(0);
@@ -273,6 +280,8 @@ export function BlockBlastGame({
   const savedOverRef = useRef(false);
   const unbindDragRef = useRef<() => void>(() => undefined);
   const trayRef = useRef<HTMLDivElement | null>(null);
+  const [overEntry, setOverEntry] = useState<QuizLeaderboardEntry | null>(null);
+  const [overRankReady, setOverRankReady] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   sessionRef.current = session;
 
@@ -446,7 +455,7 @@ export function BlockBlastGame({
         await confirmStampVisit({
           tenantId,
           clientId: player.clientId,
-          tableId: tenantConfig.brand.tableName,
+          tableId: getActiveTableLabel(tenantId),
         });
       }
     })();
@@ -455,13 +464,20 @@ export function BlockBlastGame({
   useEffect(() => {
     if (!session?.over || savedOverRef.current) return;
     savedOverRef.current = true;
+    setOverRankReady(false);
+    setOverEntry(null);
     void submitQuizScore({
       tenantId,
       clientId: player.clientId,
-      nickname: scoreNickname(),
+      nickname: scoreNickname(tenantId),
       avatar: player.avatar,
+      avatarUrl: readCustomerProfile()?.avatarUrl,
       score: session.score,
       gameType: "blockblast",
+      tableId: getActiveTableLabel(tenantId),
+    }).then((entry) => {
+      setOverEntry(entry);
+      setOverRankReady(true);
     });
   }, [player.avatar, player.clientId, session, tenantId]);
 
@@ -919,6 +935,14 @@ export function BlockBlastGame({
             <p className="mt-4 font-sans text-3xl font-black tabular-nums text-[var(--btn-primary)]">
               {session.score}
             </p>
+            <p className="mt-3 font-sans text-sm font-extrabold tracking-tight text-[var(--text-headline)]">
+              {overRankReady && overEntry?.rank
+                ? (overEntry.rank <= 5 ? copy.rankTop : copy.rankOther).replace(
+                    "{rank}",
+                    String(overEntry.rank),
+                  )
+                : copy.rankFallback}
+            </p>
             {session.claimed.length > 0 ? (
               <p className="mt-2 font-sans text-xs font-bold text-[var(--text-headline)]">
                 {copy.rewardLead}
@@ -931,6 +955,17 @@ export function BlockBlastGame({
                 className="min-h-12 flex-1 rounded-2xl bg-[var(--btn-primary)] px-6 py-3.5 font-sans text-sm font-black text-[var(--btn-text)] shadow-lg active:scale-95"
               >
                 {copy.overCta}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  writeVenueHomeView(tenantId, "lobby");
+                  writeLobbyTab(tenantId, "events");
+                  router.push(`/${tenantId}`);
+                }}
+                className="min-h-12 flex-1 rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-6 py-3.5 font-sans text-sm font-bold text-[var(--text-headline)] active:scale-95"
+              >
+                {copy.openLeaderboardCta}
               </button>
               <button
                 type="button"

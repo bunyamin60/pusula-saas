@@ -16,6 +16,7 @@ export default function TriviaPage() {
     <GuestProviders tenantId={tenantId} extraActive>
       <GameContainer
         title={tenantConfig.copy.landing.showcase.quizTitle}
+        sessionGame="quiz"
         onBack={() => router.push(`/${tenantId}`)}
       >
         <CafeQuiz />

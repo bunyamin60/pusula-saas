@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, type ReactNode } from "react";
+import { AppLoadingProvider } from "@/components/AppLoadingProvider";
 import { PwaRuntime } from "@/components/PwaRuntime";
 import { SeededCampaignContext } from "@/lib/useCampaign";
 import {
@@ -32,7 +33,7 @@ export function TenantProvider({
     <SeededCampaignContext.Provider value={initial}>
       <TenantThemeSync tenantId={tenantId} initial={initial} />
       <PwaRuntime tenantId={tenantId} />
-      {children}
+      <AppLoadingProvider>{children}</AppLoadingProvider>
     </SeededCampaignContext.Provider>
   );
 }

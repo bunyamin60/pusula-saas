@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useState } from "react";
+import { User, Users } from "lucide-react";
 import type { ArcadeGame } from "@/lib/gameCatalog";
 import { tenantConfig } from "@/config/tenant.config";
 
@@ -13,6 +14,8 @@ type ArcadeGameCardProps = {
   onClick: () => void;
 };
 
+const SOLO_GAME_IDS = new Set(["trivia", "blockblast"]);
+
 export function ArcadeGameCard({
   game,
   title,
@@ -22,13 +25,15 @@ export function ArcadeGameCard({
 }: ArcadeGameCardProps) {
   const [imageFailed, setImageFailed] = useState(false);
   const enterCta = tenantConfig.copy.landing.showcase.enterCta;
+  const solo = SOLO_GAME_IDS.has(game.id);
+  const BadgeIcon = solo ? User : Users;
 
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={`${title}. ${enterCta}`}
-      className="relative flex aspect-[4/5] min-h-[220px] w-full min-w-0 flex-col overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card-surface)] text-left shadow-sm transition-transform duration-150 active:scale-[0.96]"
+      className="relative flex aspect-square w-full min-w-0 flex-col overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card-surface)] text-left shadow-sm transition-transform duration-150 active:scale-[0.96]"
     >
       {!imageFailed ? (
         <Image
@@ -54,21 +59,22 @@ export function ArcadeGameCard({
       />
 
       <span className="relative z-20 flex h-full flex-col justify-between p-4">
-        <span className="inline-flex max-w-full self-start rounded-full bg-black/30 px-3 py-1 font-sans text-[11px] font-bold text-white backdrop-blur-md">
-          {badge}
+        <span className="inline-flex max-w-full items-center gap-1.5 self-end rounded-full bg-black/30 px-3 py-1 font-sans text-[11px] font-bold text-white backdrop-blur-md">
+          <BadgeIcon className="size-3.5 shrink-0" aria-hidden />
+          <span className="truncate">{badge}</span>
         </span>
 
         <span className="flex items-end justify-between gap-3">
           <span className="min-w-0 flex-1">
-            <span className="block font-sans text-xl font-black tracking-tight text-white">
+            <span className="block font-sans text-lg font-black tracking-tight text-white sm:text-xl">
               {title}
             </span>
-            <span className="mt-1 block font-sans text-xs font-medium leading-snug text-white/80 line-clamp-2">
+            <span className="mt-1 block font-sans text-[11px] font-medium leading-snug text-white/80 line-clamp-2 sm:text-xs">
               {caption}
             </span>
           </span>
 
-          <span className="inline-flex min-h-[48px] shrink-0 items-center justify-center rounded-full bg-[var(--btn-primary)] px-4 py-2 font-sans text-xs font-bold text-[var(--btn-text)] transition-transform active:scale-95 active:brightness-95">
+          <span className="inline-flex min-h-[48px] shrink-0 items-center justify-center rounded-full bg-[var(--btn-primary)] px-3 py-2 font-sans text-[11px] font-bold text-[var(--btn-text)] transition-transform active:scale-95 active:brightness-95 sm:px-4 sm:text-xs">
             {enterCta}
           </span>
         </span>

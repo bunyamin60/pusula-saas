@@ -1,67 +1,215 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { DuelLeaderboard } from "@/components/DuelLeaderboard";
 import { GameCountdown } from "@/components/GameCountdown";
 import { useDuel } from "@/components/DuelProvider";
 import { tenantConfig } from "@/config/tenant.config";
 import { readCustomerProfile } from "@/lib/customerProfile";
-import { submitQuizScore } from "@/lib/duelLeaderboard";
+import {
+  submitQuizScore,
+  type QuizLeaderboardEntry,
+} from "@/lib/duelLeaderboard";
+import {
+  getQuizCategory,
+  quizCategoryTitle,
+  type QuizCategoryId,
+  type QuizQuestion,
+} from "@/lib/quizBank";
+import { getActiveTableLabel } from "@/lib/tableSession";
+import { writeLobbyTab, writeVenueHomeView } from "@/lib/venueHome";
 
 const LETTERS = ["A", "B", "C", "D"] as const;
+const CATEGORY_IDS = [
+  "cafe",
+  "turkey",
+  "general",
+  "sports",
+] as const satisfies readonly QuizCategoryId[];
 
-function quizNickname() {
+type Phase = "setup" | "countdown" | "playing" | "done";
+
+function quizNickname(tenantId: string) {
   const profile = readCustomerProfile();
   if (profile?.name) return profile.name;
   return tenantConfig.copy.duel.guestPlayer.replace(
     "{table}",
-    tenantConfig.brand.tableName,
+    getActiveTableLabel(tenantId),
   );
+}
+
+function rankMessage(
+  entry: QuizLeaderboardEntry | null,
+  copy: typeof tenantConfig.copy.duel,
+): string {
+  if (!entry?.rank) return copy.rankFallback;
+  const template = entry.rank <= 5 ? copy.rankTop : copy.rankOther;
+  return template.replace("{rank}", String(entry.rank));
 }
 
 export function CafeQuiz() {
   const copy = tenantConfig.copy.duel;
-  const items = tenantConfig.duel.quiz;
+  const router = useRouter();
   const { tenantId, player } = useDuel();
+  const [phase, setPhase] = useState<Phase>("setup");
+  const [categoryId, setCategoryId] = useState<QuizCategoryId>("cafe");
+  const [playedCategory, setPlayedCategory] = useState<QuizCategoryId | null>(
+    null,
+  );
+  const [items, setItems] = useState<QuizQuestion[]>([]);
   const [round, setRound] = useState(0);
   const [score, setScore] = useState(0);
-  const [done, setDone] = useState(false);
   const [boardReady, setBoardReady] = useState(false);
-  const [introDone, setIntroDone] = useState(false);
+  const [submitted, setSubmitted] = useState<QuizLeaderboardEntry | null>(null);
   const scoreRef = useRef(0);
 
   useEffect(() => {
-    if (!done) return;
+    if (phase !== "done" || !playedCategory) return;
+    let cancelled = false;
     void submitQuizScore({
       tenantId,
       clientId: player.clientId,
-      nickname: quizNickname(),
+      nickname: quizNickname(tenantId),
       avatar: player.avatar,
+      avatarUrl: readCustomerProfile()?.avatarUrl,
       score: scoreRef.current,
-    }).finally(() => setBoardReady(true));
-  }, [done, player.avatar, player.clientId, tenantId]);
+      tableId: getActiveTableLabel(tenantId),
+      category: playedCategory,
+    }).then((entry) => {
+      if (cancelled) return;
+      setSubmitted(entry);
+      setBoardReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [phase, playedCategory, player.avatar, player.clientId, tenantId]);
 
-  const item = items[round];
+  function startCategory() {
+    const category = getQuizCategory(categoryId);
+    const questions = category ? [...category.questions] : [];
+    if (!questions.length) return;
+    scoreRef.current = 0;
+    setScore(0);
+    setRound(0);
+    setItems(questions);
+    setPlayedCategory(categoryId);
+    setSubmitted(null);
+    setBoardReady(false);
+    setPhase("countdown");
+  }
 
-  if (!introDone) {
+  function playAgain() {
+    setSubmitted(null);
+    setBoardReady(false);
+    setPlayedCategory(null);
+    setItems([]);
+    setRound(0);
+    setScore(0);
+    scoreRef.current = 0;
+    setPhase("setup");
+  }
+
+  function openLeaderboard() {
+    writeVenueHomeView(tenantId, "lobby");
+    writeLobbyTab(tenantId, "events");
+    router.push(`/${tenantId}`);
+  }
+
+  if (phase === "setup") {
     return (
-      <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-        <GameCountdown onDone={() => setIntroDone(true)} />
+      <section className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <h2 className="font-sans text-xl font-extrabold tracking-tight text-[var(--text-headline)]">
+          {copy.quizPickTitle}
+        </h2>
+        <p className="mt-1 font-sans text-sm font-medium text-[var(--text-body)]">
+          {copy.quizPickLead}
+        </p>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          {CATEGORY_IDS.map((id) => {
+            const active = categoryId === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setCategoryId(id)}
+                className={`min-h-12 rounded-2xl border-2 px-3 py-3 font-sans text-sm font-black transition active:scale-95 ${
+                  active
+                    ? "border-[var(--btn-primary)] bg-[var(--btn-primary)] text-[var(--btn-text)]"
+                    : "border-[var(--border)] bg-[var(--card-surface)] text-[var(--text-headline)]"
+                }`}
+              >
+                {quizCategoryTitle(id)}
+              </button>
+            );
+          })}
+        </div>
+        <button
+          type="button"
+          onClick={startCategory}
+          className="mt-auto min-h-14 w-full rounded-2xl bg-[var(--btn-primary)] px-4 py-3.5 font-sans text-sm font-black text-[var(--btn-text)] shadow-lg transition active:scale-95 active:brightness-95"
+        >
+          {copy.quizStart}
+        </button>
       </section>
     );
   }
 
+  if (phase === "countdown") {
+    return (
+      <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <GameCountdown onDone={() => setPhase("playing")} />
+      </section>
+    );
+  }
+
+  const item = items[round];
+
   return (
     <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-      {done || !item ? (
+      {phase === "done" || !item ? (
         <div className="mt-4 min-h-0 flex-1 overflow-y-auto text-center">
-          <p className="font-sans text-4xl font-extrabold tracking-tight text-[var(--text-headline)]">{score}</p>
-          <p className="mt-2 font-sans text-sm font-medium text-[var(--text-body)]">{copy.leaderboardAllTime}</p>
+          <p className="font-sans text-4xl font-extrabold tracking-tight text-[var(--text-headline)]">
+            {score}
+          </p>
+          <p className="mt-3 font-sans text-base font-extrabold tracking-tight text-[var(--text-headline)]">
+            {rankMessage(submitted, copy)}
+          </p>
+          {playedCategory ? (
+            <p className="mt-1 font-sans text-xs font-bold uppercase tracking-wider text-[var(--text-body)]">
+              {quizCategoryTitle(playedCategory)}
+            </p>
+          ) : null}
+          <p className="mt-2 font-sans text-sm font-medium text-[var(--text-body)]">
+            {copy.leaderboardAllTime}
+          </p>
           {boardReady ? (
             <div className="mt-6 text-left">
-              <DuelLeaderboard tenantId={tenantId} player={player} score={score} />
+              <DuelLeaderboard
+                tenantId={tenantId}
+                player={player}
+                score={score}
+                category={playedCategory}
+              />
             </div>
           ) : null}
+          <div className="mt-4 flex flex-col gap-2 pb-2">
+            <button
+              type="button"
+              onClick={playAgain}
+              className="min-h-12 w-full rounded-2xl bg-[var(--btn-primary)] px-4 py-3.5 font-sans text-sm font-black text-[var(--btn-text)] shadow-lg transition active:scale-95 active:brightness-95"
+            >
+              {copy.quizPlayAgain}
+            </button>
+            <button
+              type="button"
+              onClick={openLeaderboard}
+              className="min-h-12 w-full rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-4 py-3 font-sans text-sm font-bold text-[var(--text-headline)] transition active:scale-95"
+            >
+              {copy.quizOpenLeaderboard}
+            </button>
+          </div>
         </div>
       ) : (
         <QuizRound
@@ -82,7 +230,7 @@ export function CafeQuiz() {
           }}
           onAdvance={() => {
             if (round + 1 >= items.length) {
-              setDone(true);
+              setPhase("done");
               return;
             }
             setRound((current) => current + 1);
@@ -155,7 +303,12 @@ function QuizRound({
               .replace("{current}", String(current))
               .replace("{total}", String(total))}
           </span>
-          <span>{secondsLabel.replace("{seconds}", String(Math.ceil(remaining / 1000)))}</span>
+          <span>
+            {secondsLabel.replace(
+              "{seconds}",
+              String(Math.ceil(remaining / 1000)),
+            )}
+          </span>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--card-surface)]">
           <div
@@ -205,7 +358,9 @@ function QuizRound({
               >
                 {letter}
               </span>
-              <span className="min-w-0 flex-1 break-words leading-snug">{option}</span>
+              <span className="min-w-0 flex-1 break-words leading-snug">
+                {option}
+              </span>
             </button>
           );
         })}

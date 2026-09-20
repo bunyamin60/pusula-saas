@@ -19,6 +19,7 @@ import {
   type DuelPlayer,
 } from "@/lib/duel";
 import { getSupabase, isRealtimeJoined, wakeRealtime } from "@/lib/supabase";
+import { getAllQuizQuestions, type QuizQuestion } from "@/lib/quizBank";
 
 const COUNTDOWN_MS = 3000;
 const READY_RESEND_MS = 500;
@@ -727,7 +728,7 @@ function ScorePill({
 function scoreCeiling(gameId: DuelGameId): number {
   if (gameId === "trivia") return 1000;
   if (gameId === "emoji") return 800;
-  if (gameId === "quiz") return tenantConfig.duel.quiz.length * 200;
+  if (gameId === "quiz") return getAllQuizQuestions().length * 200;
   if (gameId === "swipe") return tenantConfig.duel.swipe.length;
   return 1;
 }
@@ -774,7 +775,7 @@ function GameEngine({
 type ChoiceItem =
   | (typeof tenantConfig.duel.trivia)[number]
   | (typeof tenantConfig.duel.emoji)[number]
-  | (typeof tenantConfig.duel.quiz)[number];
+  | QuizQuestion;
 
 function ChoiceRounds({
   gameId,
@@ -790,7 +791,7 @@ function ChoiceRounds({
       ? tenantConfig.duel.trivia
       : gameId === "emoji"
         ? tenantConfig.duel.emoji
-        : tenantConfig.duel.quiz;
+        : getAllQuizQuestions();
   const [round, setRound] = useState(0);
 
   useEffect(() => {

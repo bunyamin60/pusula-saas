@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { tenantConfig } from "@/config/tenant.config";
 import { readCustomerProfile } from "@/lib/customerProfile";
+import { getActiveTableLabel } from "@/lib/tableSession";
 import {
   fetchActiveQuestion,
   fetchDailyAnswerById,
@@ -110,7 +111,7 @@ export function DailyQuestionFeed({
   function authorLabel() {
     const profile = readCustomerProfile();
     if (profile?.name) return profile.name;
-    return tenantConfig.brand.tableName;
+    return getActiveTableLabel(tenantId);
   }
 
   async function send() {

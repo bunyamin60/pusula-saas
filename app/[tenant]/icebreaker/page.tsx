@@ -33,6 +33,7 @@ export default function IcebreakerPage() {
     <GuestProviders tenantId={tenantId} extraActive>
       <GameContainer
         title={tenantConfig.copy.landing.showcase.talkTitle}
+        sessionGame="talk"
         onBack={goHome}
       >
         <TalkDeck

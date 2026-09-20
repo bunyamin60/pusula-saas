@@ -16,6 +16,7 @@ export default function WheelPage() {
     <GuestProviders tenantId={tenantId} extraActive>
       <GameContainer
         title={tenantConfig.copy.landing.showcase.billTitle}
+        sessionGame="bill"
         onBack={() => router.push(`/${tenantId}`)}
       >
         <BillWheel />

@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { ChevronLeft } from "lucide-react";
 import { CustomerAuthModal } from "@/components/CustomerAuthModal";
+import { GuestAvatarImage } from "@/components/GuestAvatarImage";
 import { GuestShell } from "@/components/GuestShell";
 import { useDuel } from "@/components/DuelProvider";
 import { usePlayReward } from "@/components/PlayRewardProvider";
@@ -13,7 +15,9 @@ import {
   type CustomerProfile,
 } from "@/lib/customerProfile";
 import { wipeGuestLocalData } from "@/lib/guestWipe";
+import { getActiveTableLabel } from "@/lib/tableSession";
 import { useCampaign } from "@/lib/useCampaign";
+import { writeVenueHomeView } from "@/lib/venueHome";
 
 export default function ProfilePage() {
   const params = useParams<{ tenant?: string }>();
@@ -29,11 +33,12 @@ export default function ProfilePage() {
 function ProfileCard() {
   const params = useParams<{ tenant?: string }>();
   const tenantId = params.tenant ?? getActiveTenantId();
+  const router = useRouter();
   const { player, chooseIdentity } = useDuel();
   const { claimedCode } = usePlayReward();
   const campaign = useCampaign();
   const copy = tenantConfig.copy.landing;
-  const tableName = tenantConfig.brand.tableName || copy.gameShell.tableFallback;
+  const tableName = getActiveTableLabel(tenantId);
   const [saved, setSaved] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
@@ -50,6 +55,11 @@ function ProfileCard() {
     const timer = window.setTimeout(() => setIsConfirming(false), 5000);
     return () => window.clearTimeout(timer);
   }, [isConfirming]);
+
+  function goLobby() {
+    writeVenueHomeView(tenantId, "lobby");
+    router.push(`/${tenantId}`);
+  }
 
   async function saveToPhone() {
     if (!claimedCode) return;
@@ -90,13 +100,37 @@ function ProfileCard() {
 
   return (
     <section className="flex flex-col gap-3">
-      <article className="rounded-3xl border border-[var(--card-border)] bg-[var(--card-surface)] p-5 shadow-sm">
-        <h1 className="font-sans text-2xl font-extrabold tracking-tight text-[var(--text-headline)]">
-          {profile ? profile.name : copy.profileGuest}
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="min-w-0 flex-1 font-sans text-lg font-extrabold tracking-tight text-[var(--text-headline)]">
+          {copy.dock.profile}
         </h1>
-        <p className="mt-2 font-sans text-sm font-medium leading-relaxed text-[var(--text-body)]">
-          {copy.profileLead}
-        </p>
+        <button
+          type="button"
+          onClick={goLobby}
+          aria-label={copy.welcomeBack}
+          className="inline-flex min-h-12 min-w-12 shrink-0 items-center justify-center gap-1 rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-3 font-sans text-sm font-bold text-[var(--text-headline)] transition-transform active:scale-95 active:brightness-95"
+        >
+          <ChevronLeft className="size-5" aria-hidden />
+          {copy.welcomeBack}
+        </button>
+      </div>
+
+      <article className="rounded-3xl border border-[var(--card-border)] bg-[var(--card-surface)] p-5 shadow-sm">
+        <div className="flex items-center gap-4">
+          {profile?.avatarUrl ? (
+            <span className="relative size-20 shrink-0 overflow-hidden rounded-full border-4 border-[var(--bg-canvas)] shadow-md">
+              <GuestAvatarImage src={profile.avatarUrl} sizes="80px" />
+            </span>
+          ) : null}
+          <div className="min-w-0 flex-1">
+            <h2 className="font-sans text-2xl font-extrabold tracking-tight text-[var(--text-headline)]">
+              {profile ? profile.name : copy.profileGuest}
+            </h2>
+            <p className="mt-2 font-sans text-sm font-medium leading-relaxed text-[var(--text-body)]">
+              {copy.profileLead}
+            </p>
+          </div>
+        </div>
         {profile ? (
           <button
             type="button"
@@ -120,7 +154,9 @@ function ProfileCard() {
         <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-body)]">
           {copy.profileTableLabel}
         </p>
-        <p className="mt-1.5 font-sans text-lg font-extrabold text-[var(--text-headline)]">{tableName}</p>
+        <p className="mt-1.5 font-sans text-lg font-extrabold text-[var(--text-headline)]">
+          {tableName}
+        </p>
       </article>
 
       <article className="rounded-3xl border border-[var(--card-border)] bg-[var(--bg-canvas)] p-5 shadow-sm">

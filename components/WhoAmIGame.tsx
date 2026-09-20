@@ -7,6 +7,7 @@ import { useDuel } from "@/components/DuelProvider";
 import { tenantConfig } from "@/config/tenant.config";
 import { clearArcadeGameSession } from "@/lib/arcadeSession";
 import { confirmStampVisit } from "@/lib/stampCard";
+import { getActiveTableLabel } from "@/lib/tableSession";
 import {
   WHOAMI_CATEGORY_IDS,
   whoAmIDeck,
@@ -20,7 +21,7 @@ const FLASH_MS = 600;
 const COOLDOWN_MS = 1_200;
 const COUNTDOWN_MS = 700;
 const TILT_TRIGGER = 40;
-const TILT_NEUTRAL = 22;
+const TILT_NEUTRAL = 28;
 
 type WhoAmIState = "setup" | "hold" | "playing" | "over";
 type FlashKind = "correct" | "pass" | null;
@@ -108,17 +109,33 @@ function writeSession(tenantId: string, session: WhoAmISession): void {
   }
 }
 
-function tiltZone(event: DeviceOrientationEvent): TiltZone {
+function isLandscapeViewport(): boolean {
+  if (typeof window === "undefined") return false;
+  if (typeof window.matchMedia === "function") {
+    return window.matchMedia("(orientation: landscape)").matches;
+  }
+  return window.innerWidth > window.innerHeight;
+}
+
+/** Forehead nod angle relative to a calibrated baseline (degrees). */
+function nodDelta(event: DeviceOrientationEvent, baseline: number): number {
   const beta = event.beta ?? 0;
   const gamma = event.gamma ?? 0;
-  const landscape =
-    typeof window.matchMedia === "function"
-      ? window.matchMedia("(orientation: landscape)").matches
-      : window.innerWidth > window.innerHeight;
-  const nod = landscape ? gamma : beta - 90;
-  if (nod <= -TILT_TRIGGER) return "down";
-  if (nod >= TILT_TRIGGER) return "up";
-  if (Math.abs(nod) <= TILT_NEUTRAL) return "neutral";
+  let nod: number;
+  if (isLandscapeViewport()) {
+    const type = window.screen?.orientation?.type ?? "";
+    // landscape-secondary flips the gamma sign vs primary.
+    nod = type.includes("secondary") ? -gamma : gamma;
+  } else {
+    nod = beta - 90;
+  }
+  return nod - baseline;
+}
+
+function tiltZone(delta: number): TiltZone {
+  if (delta <= -TILT_TRIGGER) return "down";
+  if (delta >= TILT_TRIGGER) return "up";
+  if (Math.abs(delta) <= TILT_NEUTRAL) return "neutral";
   return "mid";
 }
 
@@ -203,6 +220,8 @@ export function WhoAmIGame() {
   const needsNeutralRef = useRef(false);
   const cooldownUntilRef = useRef(0);
   const flashWordRef = useRef<string>("");
+  const tiltBaselineRef = useRef(0);
+  const calibratingRef = useRef(false);
   sessionRef.current = session;
 
   const persist = useCallback(
@@ -298,7 +317,7 @@ export function WhoAmIGame() {
     void confirmStampVisit({
       tenantId,
       clientId: player.clientId,
-      tableId: tenantConfig.brand.tableName,
+      tableId: getActiveTableLabel(tenantId),
     }).then(() => {
       const current = sessionRef.current;
       if (!current) return;
@@ -349,7 +368,8 @@ export function WhoAmIGame() {
     if (session?.state !== "playing" || countdown) return;
     const onOrient = (event: DeviceOrientationEvent) => {
       if (Date.now() < cooldownUntilRef.current) return;
-      const zone = tiltZone(event);
+      const delta = nodDelta(event, tiltBaselineRef.current);
+      const zone = tiltZone(delta);
       if (needsNeutralRef.current) {
         if (zone === "neutral") needsNeutralRef.current = false;
         return;
@@ -360,6 +380,26 @@ export function WhoAmIGame() {
     window.addEventListener("deviceorientation", onOrient);
     return () => window.removeEventListener("deviceorientation", onOrient);
   }, [countdown, flashAndAdvance, session?.state]);
+
+  /** Sample forehead rest pose during countdown so landscape gamma bias does not lock tilts. */
+  useEffect(() => {
+    if (!countdown) return;
+    calibratingRef.current = true;
+    const samples: number[] = [];
+    const onOrient = (event: DeviceOrientationEvent) => {
+      samples.push(nodDelta(event, 0));
+    };
+    window.addEventListener("deviceorientation", onOrient);
+    return () => {
+      window.removeEventListener("deviceorientation", onOrient);
+      if (samples.length > 0) {
+        const sorted = [...samples].sort((a, b) => a - b);
+        tiltBaselineRef.current = sorted[Math.floor(sorted.length / 2)] ?? 0;
+      }
+      calibratingRef.current = false;
+      needsNeutralRef.current = false;
+    };
+  }, [countdown]);
 
   function goHold() {
     const current = sessionRef.current ?? blankSession();
@@ -496,30 +536,38 @@ export function WhoAmIGame() {
   const categoryId = liveEntry?.category;
 
   return (
-    <section className="relative flex min-h-0 flex-1 flex-col select-none">
+    <section className="relative flex min-h-0 flex-1 flex-col overflow-y-auto select-none">
       {countdown ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center">
           <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--text-body)]">
             {shell.countdownReady}
           </p>
-          <p className="mt-3 font-sans text-7xl font-extrabold tracking-tight text-[var(--text-headline)]">
+          <p className="mt-3 font-sans text-7xl font-extrabold tracking-tight text-[var(--text-headline)] landscape:text-5xl">
             {countdown}
           </p>
         </div>
       ) : (
         <>
-          <div className="relative z-20 flex items-start justify-between gap-3">
-            <p className="font-sans text-5xl font-black tabular-nums tracking-tight text-[var(--text-headline)]">
-              {String(seconds).padStart(2, "0")}s
-            </p>
-            <div className="flex flex-col items-end gap-2">
+          <div className="relative z-20 flex shrink-0 items-start justify-between gap-3">
+            <div>
+              <p className="font-sans text-4xl font-black tabular-nums tracking-tight text-[var(--text-headline)] landscape:text-3xl">
+                {String(seconds).padStart(2, "0")}s
+              </p>
+              <p className="mt-0.5 font-sans text-[10px] font-bold uppercase tracking-widest text-[var(--text-body)]/70">
+                {copy.tapPass}
+              </p>
+            </div>
+            <div className="flex flex-col items-end gap-1">
               <p className="font-sans text-xs font-bold uppercase tracking-wide text-[var(--text-headline)]">
                 {copy.scoreStat.replace("{n}", String(session.correct))}
+              </p>
+              <p className="font-sans text-[10px] font-bold uppercase tracking-widest text-[var(--text-body)]/70">
+                {copy.tapCorrect}
               </p>
             </div>
           </div>
 
-          <div className="relative mt-3 min-h-0 flex-1">
+          <div className="relative mt-2 min-h-0 flex-1">
             <button
               type="button"
               aria-label={copy.pass}
@@ -532,23 +580,17 @@ export function WhoAmIGame() {
               onClick={() => flashAndAdvance("correct")}
               className="absolute inset-y-0 right-0 z-10 w-1/2 touch-manipulation"
             />
-            <div className="pointer-events-none flex h-full min-h-[220px] flex-col items-center justify-center px-2">
-              <p className="mb-3 w-full text-left font-sans text-[10px] font-bold uppercase tracking-widest text-[var(--text-body)]/60">
-                {copy.tapPass}
-              </p>
-              <article className="flex min-h-[200px] w-full flex-col items-center justify-center rounded-3xl border-4 border-[var(--border)] bg-[var(--card-surface)] px-4 py-8 text-center shadow-2xl">
-                <h2 className="text-center font-sans text-4xl font-black tracking-wider text-[var(--text-headline)] uppercase md:text-5xl landscape:text-6xl">
+            <div className="pointer-events-none flex h-full min-h-0 flex-col items-center justify-center px-2 py-1">
+              <article className="flex w-full flex-1 max-h-full min-h-[120px] flex-col items-center justify-center rounded-3xl border-4 border-[var(--border)] bg-[var(--card-surface)] px-4 py-4 text-center shadow-2xl landscape:py-3 sm:py-6">
+                <h2 className="text-center font-sans text-3xl font-black tracking-wider text-[var(--text-headline)] uppercase sm:text-4xl landscape:text-3xl md:text-5xl">
                   {word}
                 </h2>
                 {categoryId ? (
-                  <span className="mt-4 rounded-full bg-[var(--btn-primary)]/15 px-3 py-1 font-sans text-xs font-bold text-[var(--btn-primary)]">
+                  <span className="mt-3 rounded-full bg-[var(--btn-primary)]/15 px-3 py-1 font-sans text-xs font-bold text-[var(--btn-primary)] landscape:mt-2">
                     {copy.categories[categoryId]}
                   </span>
                 ) : null}
               </article>
-              <p className="mt-3 w-full text-right font-sans text-[10px] font-bold uppercase tracking-widest text-[var(--text-body)]/60">
-                {copy.tapCorrect}
-              </p>
             </div>
           </div>
         </>
@@ -557,10 +599,12 @@ export function WhoAmIGame() {
       {flash ? (
         <div
           className={`absolute inset-0 z-30 flex items-center justify-center ${
-            flash === "correct" ? "bg-green-500" : "bg-amber-500"
+            flash === "correct"
+              ? "bg-[var(--quiz-ok)]"
+              : "bg-[var(--accent)]"
           }`}
         >
-          <p className="font-sans text-5xl font-black tracking-widest text-[var(--text-headline)] uppercase">
+          <p className="font-sans text-5xl font-black tracking-widest text-[var(--quiz-on-feedback)] uppercase landscape:text-4xl">
             {flash === "correct" ? copy.flashCorrect : copy.flashPass}
           </p>
         </div>

@@ -1,28 +1,41 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Award, ChevronLeft, Medal, Trophy } from "lucide-react";
 import { ArcadeGameCard } from "@/components/ArcadeGameCard";
 import { BrandLogo } from "@/components/BrandLogo";
 import { DailyQuestionFeed } from "@/components/DailyQuestionFeed";
 import { DeviceTestReset } from "@/components/DeviceTestReset";
+import { GuestAvatarImage } from "@/components/GuestAvatarImage";
 import { LoyaltyStampCard } from "@/components/LoyaltyStampCard";
 import { RewardProgressBar } from "@/components/RewardProgressBar";
+import { useAppLoading } from "@/components/AppLoadingProvider";
 import { useDuel } from "@/components/DuelProvider";
 import { tenantConfig } from "@/config/tenant.config";
 import { arcadeGameCopy, featuredArcadeGames } from "@/lib/gameCatalog";
 import {
+  entryAvatarSrc,
   fetchQuizLeaderboard,
   type ArcadeScoreGame,
   type QuizLeaderboardEntry,
 } from "@/lib/duelLeaderboard";
 import { resolveLogoUrl } from "@/lib/tenant";
+import { getActiveTableLabel } from "@/lib/tableSession";
 import { useCampaign } from "@/lib/useCampaign";
-import type { VenueHomeView } from "@/lib/venueHome";
+import {
+  readLobbyTab,
+  writeLobbyTab,
+  type LobbyTab,
+  type VenueHomeView,
+} from "@/lib/venueHome";
+import { quizCategoryTitle, type QuizCategoryId } from "@/lib/quizBank";
 
-type LobbyTab = "games" | "events" | "surveys";
+const QUIZ_RACE_CATEGORIES = [
+  "cafe",
+  "turkey",
+  "general",
+  "sports",
+] as const satisfies readonly QuizCategoryId[];
 
 export function Landing({
   view,
@@ -63,7 +76,7 @@ function WelcomeScreen({ onEnterLobby }: { onEnterLobby: () => void }) {
   const instagramLabel = instagramHandle
     ? copy.instagramHandle.replace("{handle}", instagramHandle)
     : copy.instagramChip;
-  const tableLabel = tenantConfig.brand.tableName.trim();
+  const tableLabel = getActiveTableLabel(tenantId).trim();
 
   return (
     <section className="flex min-h-0 flex-1 flex-col justify-between px-6 pb-6">
@@ -106,9 +119,9 @@ function WelcomeScreen({ onEnterLobby }: { onEnterLobby: () => void }) {
 function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
   const copy = tenantConfig.copy.landing;
   const campaign = useCampaign();
-  const router = useRouter();
   const { tenantId, player } = useDuel();
-  const [tab, setTab] = useState<LobbyTab>("games");
+  const { navigateWithLoading } = useAppLoading();
+  const [tab, setTab] = useState<LobbyTab>(() => readLobbyTab(tenantId));
   const brand = (campaign.brandName || tenantConfig.brand.name).trim();
   const logoUrl =
     resolveLogoUrl(campaign.logoUrl, tenantId) || tenantConfig.brand.logoUrl;
@@ -118,6 +131,16 @@ function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
     ["events", copy.tabs.events],
     ["surveys", copy.tabs.surveys],
   ];
+
+  useEffect(() => {
+    setTab(readLobbyTab(tenantId));
+  }, [tenantId]);
+
+  function selectTab(next: LobbyTab) {
+    if (next === tab) return;
+    setTab(next);
+    writeLobbyTab(tenantId, next);
+  }
 
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -144,7 +167,7 @@ function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
                 <button
                   key={id}
                   type="button"
-                  onClick={() => setTab(id)}
+                  onClick={() => selectTab(id)}
                   className={`min-h-12 rounded-full px-2 py-2 font-sans text-[12px] tracking-wide transition-colors ${
                     active
                       ? "bg-[var(--tab-active-bg)] font-extrabold text-[var(--tab-active-text)] shadow-sm"
@@ -169,7 +192,9 @@ function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
                   title={title}
                   badge={badge}
                   caption={caption}
-                  onClick={() => router.push(`/${tenantId}${game.path}`)}
+                  onClick={() =>
+                    navigateWithLoading(`/${tenantId}${game.path}`)
+                  }
                 />
               );
             })}
@@ -179,7 +204,7 @@ function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
             <LoyaltyStampCard
               tenantId={tenantId}
               clientId={player.clientId}
-              tableId={tenantConfig.brand.tableName}
+              tableId={getActiveTableLabel(tenantId)}
             />
             <DailyQuestionFeed tenantId={tenantId} clientId={player.clientId} />
             <EventsRaceCard
@@ -187,6 +212,7 @@ function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
               gameType="quiz"
               href={`/${tenantId}/trivia`}
               copy={copy.race}
+              categoryTabs
             />
             <EventsRaceCard
               tenantId={tenantId}
@@ -216,6 +242,7 @@ function EventsRaceCard({
   href,
   copy,
   medals = false,
+  categoryTabs = false,
 }: {
   tenantId: string;
   gameType: ArcadeScoreGame;
@@ -229,18 +256,26 @@ function EventsRaceCard({
     points: string;
   };
   medals?: boolean;
+  categoryTabs?: boolean;
 }) {
+  const { navigateWithLoading } = useAppLoading();
+  const [category, setCategory] = useState<QuizCategoryId>("cafe");
   const [entries, setEntries] = useState<QuizLeaderboardEntry[] | null>(null);
 
   useEffect(() => {
     let active = true;
-    void fetchQuizLeaderboard(tenantId, undefined, gameType).then((result) => {
+    void fetchQuizLeaderboard(
+      tenantId,
+      undefined,
+      gameType,
+      categoryTabs ? category : null,
+    ).then((result) => {
       if (active) setEntries(result.filter((entry) => entry.rank <= 5).slice(0, 5));
     });
     return () => {
       active = false;
     };
-  }, [gameType, tenantId]);
+  }, [category, categoryTabs, gameType, tenantId]);
 
   return (
     <section className="rounded-3xl border border-[var(--border)] bg-[var(--card-surface)] p-5 shadow-sm">
@@ -258,6 +293,28 @@ function EventsRaceCard({
         </div>
       </div>
 
+      {categoryTabs ? (
+        <div className="mt-3 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+          {QUIZ_RACE_CATEGORIES.map((id) => {
+            const active = category === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setCategory(id)}
+                className={`min-h-10 rounded-xl border px-2 py-2 font-sans text-[11px] font-bold transition active:scale-95 ${
+                  active
+                    ? "border-[var(--btn-primary)] bg-[var(--btn-primary)] text-[var(--btn-text)]"
+                    : "border-[var(--border)] bg-[var(--bg-canvas)] text-[var(--text-headline)]"
+                }`}
+              >
+                {quizCategoryTitle(id)}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
       {entries == null ? (
         <p className="mt-4 text-center font-sans text-sm font-medium text-[var(--text-body)]">
           {copy.loading}
@@ -268,31 +325,42 @@ function EventsRaceCard({
         </p>
       ) : (
         <ol className="mt-4 space-y-1.5">
-          {entries.map((entry) => (
-            <li
-              key={entry.clientId}
-              className="grid grid-cols-[2rem_1fr_auto] items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--bg-canvas)] px-3 py-2"
-            >
-              <span className="flex items-center justify-center font-sans text-xs font-black tabular-nums text-[var(--text-headline)]">
-                {medals ? <RankMedal rank={entry.rank} /> : `#${entry.rank}`}
-              </span>
-              <span className="min-w-0 truncate font-sans text-sm font-semibold text-[var(--text-headline)]">
-                {entry.nickname}
-              </span>
-              <span className="font-sans text-xs font-bold tabular-nums text-[var(--text-body)]">
-                {copy.points.replace("{score}", String(entry.score))}
-              </span>
-            </li>
-          ))}
+          {entries.map((entry) => {
+            const avatarSrc = entryAvatarSrc(entry);
+            return (
+              <li
+                key={entry.clientId}
+                className="grid grid-cols-[2rem_auto_1fr_auto] items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--bg-canvas)] px-3 py-2"
+              >
+                <span className="flex items-center justify-center font-sans text-xs font-black tabular-nums text-[var(--text-headline)]">
+                  {medals ? <RankMedal rank={entry.rank} /> : `#${entry.rank}`}
+                </span>
+                {avatarSrc ? (
+                  <span className="relative size-8 shrink-0 overflow-hidden rounded-full border border-[var(--border)]">
+                    <GuestAvatarImage src={avatarSrc} sizes="32px" />
+                  </span>
+                ) : (
+                  <span className="size-8 shrink-0" aria-hidden />
+                )}
+                <span className="min-w-0 truncate font-sans text-sm font-semibold text-[var(--text-headline)]">
+                  {entry.nickname}
+                </span>
+                <span className="font-sans text-xs font-bold tabular-nums text-[var(--text-body)]">
+                  {copy.points.replace("{score}", String(entry.score))}
+                </span>
+              </li>
+            );
+          })}
         </ol>
       )}
 
-      <Link
-        href={href}
+      <button
+        type="button"
+        onClick={() => navigateWithLoading(href)}
         className="mt-4 flex min-h-12 w-full items-center justify-center rounded-2xl bg-[var(--btn-primary)] px-4 py-3 font-sans text-sm font-extrabold text-[var(--btn-text)] shadow-sm transition hover:brightness-95 active:scale-95"
       >
         {copy.cta}
-      </Link>
+      </button>
     </section>
   );
 }
