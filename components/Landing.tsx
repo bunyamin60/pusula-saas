@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Award, ChevronLeft, Medal, Trophy } from "lucide-react";
 import { ArcadeGameCard } from "@/components/ArcadeGameCard";
+import { useAppLoading } from "@/components/AppLoadingProvider";
 import { BrandLogo } from "@/components/BrandLogo";
 import { DailyQuestionFeed } from "@/components/DailyQuestionFeed";
 import { DeviceTestReset } from "@/components/DeviceTestReset";
 import { GuestAvatarImage } from "@/components/GuestAvatarImage";
 import { LoyaltyStampCard } from "@/components/LoyaltyStampCard";
 import { RewardProgressBar } from "@/components/RewardProgressBar";
-import { useAppLoading } from "@/components/AppLoadingProvider";
 import { useDuel } from "@/components/DuelProvider";
 import { tenantConfig } from "@/config/tenant.config";
 import { arcadeGameCopy, featuredArcadeGames } from "@/lib/gameCatalog";
@@ -23,8 +24,11 @@ import { resolveLogoUrl } from "@/lib/tenant";
 import { getActiveTableLabel } from "@/lib/tableSession";
 import { useCampaign } from "@/lib/useCampaign";
 import {
+  clearLobbyRaceFocus,
+  LOBBY_TAB_EVENT,
+  readLobbyRaceFocus,
   readLobbyTab,
-  writeLobbyTab,
+  type LobbyRaceFocus,
   type LobbyTab,
   type VenueHomeView,
 } from "@/lib/venueHome";
@@ -119,28 +123,33 @@ function WelcomeScreen({ onEnterLobby }: { onEnterLobby: () => void }) {
 function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
   const copy = tenantConfig.copy.landing;
   const campaign = useCampaign();
+  const router = useRouter();
   const { tenantId, player } = useDuel();
-  const { navigateWithLoading } = useAppLoading();
   const [tab, setTab] = useState<LobbyTab>(() => readLobbyTab(tenantId));
+  const [raceFocus, setRaceFocus] = useState<LobbyRaceFocus | null>(null);
   const brand = (campaign.brandName || tenantConfig.brand.name).trim();
   const logoUrl =
     resolveLogoUrl(campaign.logoUrl, tenantId) || tenantConfig.brand.logoUrl;
   const visible = featuredArcadeGames(campaign.enabledGames);
-  const tabs: Array<[LobbyTab, string]> = [
-    ["games", copy.tabs.games],
-    ["events", copy.tabs.events],
-    ["surveys", copy.tabs.surveys],
-  ];
 
   useEffect(() => {
     setTab(readLobbyTab(tenantId));
+    const focus = readLobbyRaceFocus(tenantId);
+    setRaceFocus(focus);
+    if (focus) clearLobbyRaceFocus(tenantId);
   }, [tenantId]);
 
-  function selectTab(next: LobbyTab) {
-    if (next === tab) return;
-    setTab(next);
-    writeLobbyTab(tenantId, next);
-  }
+  useEffect(() => {
+    function onTab(event: Event) {
+      const detail = (event as CustomEvent<{ tenantId: string; tab: LobbyTab }>)
+        .detail;
+      if (!detail || detail.tenantId !== tenantId) return;
+      setTab(detail.tab);
+      setRaceFocus(null);
+    }
+    window.addEventListener(LOBBY_TAB_EVENT, onTab);
+    return () => window.removeEventListener(LOBBY_TAB_EVENT, onTab);
+  }, [tenantId]);
 
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -159,73 +168,76 @@ function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
       <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-5 pb-2">
         <RewardProgressBar compact />
 
-        <div className="rounded-full border border-[var(--border)] bg-[var(--card-surface)] p-1">
-          <div className="grid grid-cols-3 gap-1">
-            {tabs.map(([id, label]) => {
-              const active = tab === id;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => selectTab(id)}
-                  className={`min-h-12 rounded-full px-2 py-2 font-sans text-[12px] tracking-wide transition-colors ${
-                    active
-                      ? "bg-[var(--tab-active-bg)] font-extrabold text-[var(--tab-active-text)] shadow-sm"
-                      : "font-medium text-[var(--text-body)]"
-                  }`}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
+        <div className="mt-3">
+          <DailyQuestionFeed tenantId={tenantId} clientId={player.clientId} />
         </div>
 
         {tab === "games" ? (
-          <div className="mt-1 grid grid-cols-2 gap-3 pb-3 pt-2">
-            {visible.map((game) => {
-              const { title, badge, caption } = arcadeGameCopy(game.id);
-              return (
-                <ArcadeGameCard
-                  key={game.id}
-                  game={game}
-                  title={title}
-                  badge={badge}
-                  caption={caption}
-                  onClick={() =>
-                    navigateWithLoading(`/${tenantId}${game.path}`)
-                  }
-                />
-              );
-            })}
+          <div className="mt-3 space-y-3 pb-3">
+            <div className="grid grid-cols-2 gap-3">
+              {visible.map((game) => {
+                const { title, badge, caption } = arcadeGameCopy(game.id);
+                return (
+                  <ArcadeGameCard
+                    key={game.id}
+                    game={game}
+                    title={title}
+                    badge={badge}
+                    caption={caption}
+                    onClick={() => router.push(`/${tenantId}${game.path}`)}
+                  />
+                );
+              })}
+            </div>
           </div>
         ) : tab === "events" ? (
           <div className="mt-3 space-y-4">
+            {raceFocus === "blockblast" ? (
+              <>
+                <EventsRaceCard
+                  tenantId={tenantId}
+                  gameType="blockblast"
+                  href={`/${tenantId}/blockblast`}
+                  copy={copy.blastRace}
+                  medals
+                  focus
+                />
+                <EventsRaceCard
+                  tenantId={tenantId}
+                  gameType="quiz"
+                  href={`/${tenantId}/trivia`}
+                  copy={copy.race}
+                  categoryTabs
+                />
+              </>
+            ) : (
+              <>
+                <EventsRaceCard
+                  tenantId={tenantId}
+                  gameType="quiz"
+                  href={`/${tenantId}/trivia`}
+                  copy={copy.race}
+                  categoryTabs
+                  focus={raceFocus === "quiz"}
+                />
+                <EventsRaceCard
+                  tenantId={tenantId}
+                  gameType="blockblast"
+                  href={`/${tenantId}/blockblast`}
+                  copy={copy.blastRace}
+                  medals
+                />
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="mt-3">
             <LoyaltyStampCard
               tenantId={tenantId}
               clientId={player.clientId}
               tableId={getActiveTableLabel(tenantId)}
             />
-            <DailyQuestionFeed tenantId={tenantId} clientId={player.clientId} />
-            <EventsRaceCard
-              tenantId={tenantId}
-              gameType="quiz"
-              href={`/${tenantId}/trivia`}
-              copy={copy.race}
-              categoryTabs
-            />
-            <EventsRaceCard
-              tenantId={tenantId}
-              gameType="blockblast"
-              href={`/${tenantId}/blockblast`}
-              copy={copy.blastRace}
-              medals
-            />
           </div>
-        ) : (
-          <p className="mt-8 text-center font-sans text-sm font-medium text-[var(--text-body)]">
-            {copy.surveysEmpty}
-          </p>
         )}
 
         <div className="mt-2">
@@ -243,6 +255,7 @@ function EventsRaceCard({
   copy,
   medals = false,
   categoryTabs = false,
+  focus = false,
 }: {
   tenantId: string;
   gameType: ArcadeScoreGame;
@@ -257,28 +270,55 @@ function EventsRaceCard({
   };
   medals?: boolean;
   categoryTabs?: boolean;
+  focus?: boolean;
 }) {
-  const { navigateWithLoading } = useAppLoading();
+  const router = useRouter();
+  const { runWithSlowGuard } = useAppLoading();
+  const cardRef = useRef<HTMLElement>(null);
   const [category, setCategory] = useState<QuizCategoryId>("cafe");
   const [entries, setEntries] = useState<QuizLeaderboardEntry[] | null>(null);
+  const [spotlight, setSpotlight] = useState(false);
 
   useEffect(() => {
     let active = true;
-    void fetchQuizLeaderboard(
-      tenantId,
-      undefined,
-      gameType,
-      categoryTabs ? category : null,
+    void runWithSlowGuard(() =>
+      fetchQuizLeaderboard(
+        tenantId,
+        undefined,
+        gameType,
+        categoryTabs ? category : null,
+      ),
     ).then((result) => {
       if (active) setEntries(result.filter((entry) => entry.rank <= 5).slice(0, 5));
     });
     return () => {
       active = false;
     };
-  }, [category, categoryTabs, gameType, tenantId]);
+  }, [category, categoryTabs, gameType, runWithSlowGuard, tenantId]);
+
+  useEffect(() => {
+    if (!focus || !cardRef.current) return;
+    const node = cardRef.current;
+    const frame = window.requestAnimationFrame(() => {
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+      setSpotlight(true);
+    });
+    const clear = window.setTimeout(() => setSpotlight(false), 1600);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(clear);
+    };
+  }, [focus]);
 
   return (
-    <section className="rounded-3xl border border-[var(--border)] bg-[var(--card-surface)] p-5 shadow-sm">
+    <section
+      ref={cardRef}
+      className={`rounded-3xl border bg-[var(--card-surface)] p-5 shadow-sm transition-[box-shadow,border-color] duration-500 ${
+        spotlight
+          ? "border-[var(--btn-primary)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--btn-primary)_28%,transparent)]"
+          : "border-[var(--border)]"
+      }`}
+    >
       <div className="flex items-center gap-2">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-[var(--btn-primary)] text-[var(--btn-text)]">
           <Trophy className="size-4" aria-hidden />
@@ -356,7 +396,7 @@ function EventsRaceCard({
 
       <button
         type="button"
-        onClick={() => navigateWithLoading(href)}
+        onClick={() => router.push(href)}
         className="mt-4 flex min-h-12 w-full items-center justify-center rounded-2xl bg-[var(--btn-primary)] px-4 py-3 font-sans text-sm font-extrabold text-[var(--btn-text)] shadow-sm transition hover:brightness-95 active:scale-95"
       >
         {copy.cta}

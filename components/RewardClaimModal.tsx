@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useDragControls } from "framer-motion";
 import { X } from "lucide-react";
 import { OptionIcon } from "@/components/OptionIcon";
 import { usePlayReward } from "@/components/PlayRewardProvider";
@@ -27,7 +27,8 @@ export function RewardClaimModal() {
       ? campaign.questions
       : tenantConfig.playReward.questions;
   const funnelOn = pusulaFunnelEnabled(campaign.enabledGames);
-  const { claimOpen, closeClaim, claimedCode, recipeId, sealClaim } = usePlayReward();
+  const { claimOpen, closeClaim, claimedCode, redeemedAt, recipeId, sealClaim, targetMinutes } =
+    usePlayReward();
   const sealedRecipe = getPlayRewardRecipe(recipeId);
   const [step, setStep] = useState<ClaimStep>("congrats");
   const [index, setIndex] = useState(0);
@@ -35,6 +36,7 @@ export function RewardClaimModal() {
   const [recipe, setRecipe] = useState<Recipe | null>(sealedRecipe);
   const [code, setCode] = useState(claimedCode);
   const [mounted, setMounted] = useState(false);
+  const dragControls = useDragControls();
 
   useEffect(() => setMounted(true), []);
 
@@ -132,9 +134,25 @@ export function RewardClaimModal() {
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", stiffness: 340, damping: 32 }}
-            className="relative z-10 max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-t-3xl border border-ink/15 bg-background px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 shadow-lift"
+            drag="y"
+            dragControls={dragControls}
+            dragListener={false}
+            dragConstraints={{ top: 0, bottom: 0 }}
+            dragElastic={{ top: 0.04, bottom: 0.72 }}
+            onDragEnd={(_, info) => {
+              if (info.offset.y > 110 || info.velocity.y > 650) {
+                closeClaim();
+              }
+            }}
+            className="relative z-10 flex max-h-[92dvh] w-full max-w-md flex-col overflow-hidden rounded-t-3xl border border-ink/15 bg-background shadow-lift"
           >
-            <div className="mx-auto h-1.5 w-12 rounded-full bg-surface" />
+            <div
+              className="shrink-0 touch-none px-5 pb-1 pt-3"
+              onPointerDown={(event) => dragControls.start(event)}
+            >
+              <div className="mx-auto h-1.5 w-12 rounded-full bg-surface" />
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
             <div className="mt-2 flex items-start justify-between gap-3">
               <div className="min-w-0">
                 {step === "compass" ? (
@@ -162,7 +180,7 @@ export function RewardClaimModal() {
                   {copy.congratsTitle}
                 </h2>
                 <p className="mt-3 font-sans text-sm font-medium leading-relaxed text-muted">
-                  {copy.congratsBody}
+                  {copy.congratsBody.replace("{minutes}", String(targetMinutes))}
                 </p>
                 <button
                   type="button"
@@ -261,18 +279,32 @@ export function RewardClaimModal() {
                 {resultNote ? (
                   <p className="mt-2 font-sans text-sm font-medium text-muted">{resultNote}</p>
                 ) : null}
-                <div className="mt-5 rounded-3xl border border-ink/15 bg-primary px-4 py-5">
+                {funnelOn && result && !redeemedAt ? (
+                  <button
+                    type="button"
+                    onClick={openCompass}
+                    className="btn-secondary mt-4 w-full"
+                  >
+                    {copy.resultCompassAgainCta}
+                  </button>
+                ) : null}
+                <div className="relative mt-5 overflow-hidden rounded-3xl border border-ink/15 bg-primary px-4 py-5">
                   <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.16em] text-on-primary">
                     {copy.couponLabel}
                   </p>
                   <p className="mt-2 font-mono text-3xl font-black tracking-[0.14em] text-on-primary">
                     {code}
                   </p>
+                  {redeemedAt ? (
+                    <span className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 -rotate-12 rounded-xl border-4 border-red-500/90 px-4 py-2 font-sans text-2xl font-black uppercase tracking-[0.18em] text-red-500">
+                      {copy.couponUsedStamp}
+                    </span>
+                  ) : null}
                 </div>
                 <p className="mt-4 font-sans text-sm font-medium leading-relaxed text-muted">
-                  {copy.couponHint}
+                  {redeemedAt ? copy.couponUsedBody : copy.couponHint}
                 </p>
-                {funnelOn && !result ? (
+                {funnelOn && !result && !redeemedAt ? (
                   <div className="mt-5">
                     <p className="mb-2.5 font-sans text-sm font-semibold text-[var(--text-body)]">
                       {copy.resultCompassLead}
@@ -296,6 +328,7 @@ export function RewardClaimModal() {
                 </button>
               </div>
             ) : null}
+            </div>
           </motion.section>
         </motion.div>
       ) : null}

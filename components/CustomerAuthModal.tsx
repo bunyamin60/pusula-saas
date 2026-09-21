@@ -24,12 +24,16 @@ type CustomerAuthModalProps = {
   open: boolean;
   onClose: () => void;
   onSaved: (profile: CustomerProfile) => void;
+  title?: string;
+  submitLabel?: string;
 };
 
 export function CustomerAuthModal({
   open,
   onClose,
   onSaved,
+  title,
+  submitLabel,
 }: CustomerAuthModalProps) {
   const copy = tenantConfig.copy.landing;
   const { tenantId, player, chooseIdentity } = useDuel();
@@ -135,7 +139,7 @@ export function CustomerAuthModal({
                 id="customer-auth-title"
                 className="font-sans text-2xl font-extrabold leading-tight tracking-tight text-[var(--text-headline)]"
               >
-                {copy.authTitle}
+                {title?.trim() || copy.authTitle}
               </h2>
               <button
                 type="button"
@@ -234,7 +238,7 @@ export function CustomerAuthModal({
                 disabled={busy}
                 className="btn-primary mt-2 w-full disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {busy ? copy.authBusy : copy.authSubmit}
+                {busy ? copy.authBusy : submitLabel?.trim() || copy.authSubmit}
               </button>
             </form>
           </motion.section>

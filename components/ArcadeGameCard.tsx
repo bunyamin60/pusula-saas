@@ -33,7 +33,7 @@ export function ArcadeGameCard({
       type="button"
       onClick={onClick}
       aria-label={`${title}. ${enterCta}`}
-      className="relative flex aspect-square w-full min-w-0 flex-col overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card-surface)] text-left shadow-sm transition-transform duration-150 active:scale-[0.96]"
+      className="relative flex aspect-[4/5] w-full min-w-0 flex-col overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--card-surface)] text-left shadow-sm transition-transform duration-150 active:scale-[0.96]"
     >
       {!imageFailed ? (
         <Image
@@ -41,7 +41,7 @@ export function ArcadeGameCard({
           alt=""
           fill
           sizes="(max-width: 448px) 50vw, 220px"
-          className="z-0 object-cover"
+          className="z-0 object-cover object-center"
           onError={() => setImageFailed(true)}
           priority={game.id === "blockblast"}
         />
@@ -52,31 +52,28 @@ export function ArcadeGameCard({
         />
       )}
 
-      {/* Cover scrim: keeps type readable on any photo (not brand chrome). */}
       <span
         aria-hidden
-        className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-t from-black/90 via-black/40 to-transparent"
+        className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-t from-black/95 via-black/45 to-black/10"
       />
 
-      <span className="relative z-20 flex h-full flex-col justify-between p-4">
-        <span className="inline-flex max-w-full items-center gap-1.5 self-end rounded-full bg-black/30 px-3 py-1 font-sans text-[11px] font-bold text-white backdrop-blur-md">
-          <BadgeIcon className="size-3.5 shrink-0" aria-hidden />
-          <span className="truncate">{badge}</span>
+      <span className="absolute right-2.5 top-2.5 z-20 inline-flex max-w-[calc(100%-1.25rem)] items-center gap-1 rounded-full bg-black/45 px-2.5 py-1 font-sans text-[10px] font-bold text-white backdrop-blur-md">
+        <BadgeIcon className="size-3 shrink-0" aria-hidden />
+        <span className="truncate">{badge}</span>
+      </span>
+
+      <span className="relative z-20 mt-auto flex w-full min-w-0 flex-col gap-2 p-3 pt-10">
+        <span className="min-w-0">
+          <span className="block truncate font-sans text-base font-black leading-tight tracking-tight text-white">
+            {title}
+          </span>
+          <span className="mt-0.5 block truncate font-sans text-[11px] font-medium leading-snug text-white/80">
+            {caption}
+          </span>
         </span>
 
-        <span className="flex items-end justify-between gap-3">
-          <span className="min-w-0 flex-1">
-            <span className="block font-sans text-lg font-black tracking-tight text-white sm:text-xl">
-              {title}
-            </span>
-            <span className="mt-1 block font-sans text-[11px] font-medium leading-snug text-white/80 line-clamp-2 sm:text-xs">
-              {caption}
-            </span>
-          </span>
-
-          <span className="inline-flex min-h-[48px] shrink-0 items-center justify-center rounded-full bg-[var(--btn-primary)] px-3 py-2 font-sans text-[11px] font-bold text-[var(--btn-text)] transition-transform active:scale-95 active:brightness-95 sm:px-4 sm:text-xs">
-            {enterCta}
-          </span>
+        <span className="flex min-h-11 w-full shrink-0 items-center justify-center rounded-xl bg-[var(--btn-primary)] px-3 font-sans text-xs font-extrabold text-[var(--btn-text)]">
+          {enterCta}
         </span>
       </span>
     </button>

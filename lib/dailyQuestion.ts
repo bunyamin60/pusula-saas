@@ -1,5 +1,5 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
-import { filterProfanity } from "@/lib/profanityFilter";
+import { moderateGossipText } from "@/lib/profanityFilter";
 import { getSupabase, wakeRealtime } from "@/lib/supabase";
 
 export const LAST_GOSSIP_TIME_KEY = "last_gossip_time";
@@ -19,6 +19,8 @@ export type DailyQuestion = {
   createdAt: string;
 };
 
+export type DailyAnswerStatus = "approved" | "pending";
+
 export type DailyAnswer = {
   id: string;
   tenantId: string;
@@ -28,6 +30,8 @@ export type DailyAnswer = {
   likeCount: number;
   isHidden: boolean;
   createdAt: string;
+  avatarUrl?: string | null;
+  status: DailyAnswerStatus;
 };
 
 type QuestionRow = {
@@ -48,7 +52,16 @@ type AnswerRow = {
   like_count: number;
   is_hidden: boolean;
   created_at: string;
+  avatar_url?: string | null;
+  status?: string | null;
 };
+
+const ANSWER_COLUMNS =
+  "id, tenant_id, question_id, author_label, body, like_count, is_hidden, created_at, avatar_url, status";
+const ANSWER_COLUMNS_NO_STATUS =
+  "id, tenant_id, question_id, author_label, body, like_count, is_hidden, created_at, avatar_url";
+const ANSWER_COLUMNS_LEGACY =
+  "id, tenant_id, question_id, author_label, body, like_count, is_hidden, created_at";
 
 function questionFromRow(row: QuestionRow): DailyQuestion {
   return {
@@ -60,7 +73,13 @@ function questionFromRow(row: QuestionRow): DailyQuestion {
   };
 }
 
+function parseStatus(value: string | null | undefined): DailyAnswerStatus {
+  return value === "pending" ? "pending" : "approved";
+}
+
 function answerFromRow(row: AnswerRow): DailyAnswer {
+  const avatar =
+    typeof row.avatar_url === "string" ? row.avatar_url.trim() : "";
   return {
     id: row.id,
     tenantId: row.tenant_id,
@@ -70,6 +89,8 @@ function answerFromRow(row: AnswerRow): DailyAnswer {
     likeCount: Number(row.like_count) || 0,
     isHidden: Boolean(row.is_hidden),
     createdAt: row.created_at,
+    avatarUrl: avatar || null,
+    status: parseStatus(row.status),
   };
 }
 
@@ -189,23 +210,44 @@ export async function fetchActiveQuestion(
 
 export async function fetchDailyAnswers(
   tenantId: string,
-  options?: { questionId?: string; includeHidden?: boolean; limit?: number },
+  options?: {
+    questionId?: string;
+    includeHidden?: boolean;
+    limit?: number;
+    status?: DailyAnswerStatus | "all";
+  },
 ): Promise<DailyAnswer[]> {
   try {
     const supabase = getSupabase();
     if (!supabase || !tenantId) return [];
     const limit = options?.limit ?? 40;
-    let query = supabase
-      .from("daily_answers")
-      .select(
-        "id, tenant_id, question_id, author_label, body, like_count, is_hidden, created_at",
-      )
-      .eq("tenant_id", tenantId)
-      .order("created_at", { ascending: false })
-      .limit(limit);
-    if (options?.questionId) query = query.eq("question_id", options.questionId);
-    if (!options?.includeHidden) query = query.eq("is_hidden", false);
-    const { data, error } = await query;
+    const status = options?.status ?? "approved";
+    const run = (columns: string) => {
+      let query = supabase
+        .from("daily_answers")
+        .select(columns)
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (options?.questionId) query = query.eq("question_id", options.questionId);
+      if (!options?.includeHidden) query = query.eq("is_hidden", false);
+      if (status !== "all") query = query.eq("status", status);
+      return query;
+    };
+    let { data, error } = await run(ANSWER_COLUMNS);
+    if (error && /status/i.test(error.message)) {
+      ({ data, error } = await run(ANSWER_COLUMNS_NO_STATUS));
+      if (error && /avatar_url/i.test(error.message)) {
+        ({ data, error } = await run(ANSWER_COLUMNS_LEGACY));
+      }
+      if (error || !Array.isArray(data)) return [];
+      const mapped = (data as AnswerRow[]).map(answerFromRow);
+      if (status === "pending") return [];
+      return mapped.filter((entry) => options?.includeHidden || !entry.isHidden);
+    }
+    if (error && /avatar_url/i.test(error.message)) {
+      ({ data, error } = await run(ANSWER_COLUMNS_LEGACY));
+    }
     if (error || !Array.isArray(data)) return [];
     return (data as AnswerRow[])
       .map(answerFromRow)
@@ -221,13 +263,25 @@ export async function fetchDailyAnswerById(
   try {
     const supabase = getSupabase();
     if (!supabase || !id) return null;
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("daily_answers")
-      .select(
-        "id, tenant_id, question_id, author_label, body, like_count, is_hidden, created_at",
-      )
+      .select(ANSWER_COLUMNS)
       .eq("id", id)
       .maybeSingle();
+    if (error && /status/i.test(error.message)) {
+      ({ data, error } = await supabase
+        .from("daily_answers")
+        .select(ANSWER_COLUMNS_NO_STATUS)
+        .eq("id", id)
+        .maybeSingle());
+    }
+    if (error && /avatar_url/i.test(error.message)) {
+      ({ data, error } = await supabase
+        .from("daily_answers")
+        .select(ANSWER_COLUMNS_LEGACY)
+        .eq("id", id)
+        .maybeSingle());
+    }
     if (error || !data) return null;
     return answerFromRow(data as AnswerRow);
   } catch {
@@ -322,36 +376,102 @@ export async function submitDailyAnswer(input: {
   questionId: string;
   authorLabel: string;
   body: string;
+  avatarUrl?: string | null;
 }): Promise<
   | { ok: true; answer: DailyAnswer }
   | { ok: false; reason: "blocked" | "wait" | "offline" }
 > {
   if (gossipCooldownRemaining() > 0) return { ok: false, reason: "wait" };
-  const filtered = filterProfanity(input.body);
-  if (!filtered.cleanText) return { ok: false, reason: "blocked" };
+  const moderated = moderateGossipText(input.body);
+  if (moderated.empty) return { ok: false, reason: "blocked" };
   try {
     const supabase = getSupabase();
     if (!supabase || !input.tenantId) return { ok: false, reason: "offline" };
-    const { data, error } = await supabase
+    const avatarUrl =
+      typeof input.avatarUrl === "string" ? input.avatarUrl.trim().slice(0, 160) : "";
+    const base = {
+      tenant_id: input.tenantId,
+      question_id: input.questionId,
+      author_label: input.authorLabel.trim().slice(0, 64),
+      body: moderated.text,
+      is_hidden: false,
+      like_count: 0,
+      status: moderated.status,
+    };
+    let { data, error } = await supabase
       .from("daily_answers")
-      .insert({
-        tenant_id: input.tenantId,
-        question_id: input.questionId,
-        author_label: input.authorLabel.trim().slice(0, 64),
-        body: filtered.cleanText,
-        is_hidden: false,
-        like_count: 0,
-      })
-      .select(
-        "id, tenant_id, question_id, author_label, body, like_count, is_hidden, created_at",
-      )
+      .insert(avatarUrl ? { ...base, avatar_url: avatarUrl } : base)
+      .select(ANSWER_COLUMNS)
       .single();
+    if (error && /status/i.test(error.message)) {
+      const { status: _status, ...withoutStatus } = base;
+      ({ data, error } = await supabase
+        .from("daily_answers")
+        .insert(
+          avatarUrl
+            ? { ...withoutStatus, avatar_url: avatarUrl }
+            : withoutStatus,
+        )
+        .select(ANSWER_COLUMNS_NO_STATUS)
+        .single());
+      if (!error && data && moderated.status === "pending") {
+        // Column missing: fall back to hidden so it stays off the public feed.
+        await supabase
+          .from("daily_answers")
+          .update({ is_hidden: true })
+          .eq("id", (data as AnswerRow).id);
+        data = { ...(data as AnswerRow), is_hidden: true, status: "pending" };
+      }
+    }
+    if (error && /avatar_url/i.test(error.message)) {
+      const { status: _s, ...rest } = base;
+      ({ data, error } = await supabase
+        .from("daily_answers")
+        .insert(rest)
+        .select(ANSWER_COLUMNS_LEGACY)
+        .single());
+    }
     if (error || !data) return { ok: false, reason: "offline" };
     markGossipSent();
     rememberLastGossipAnswer(data.id);
-    return { ok: true, answer: answerFromRow(data as AnswerRow) };
+    const answer = answerFromRow(data as AnswerRow);
+    return {
+      ok: true,
+      answer: {
+        ...answer,
+        status: moderated.status,
+      },
+    };
   } catch {
     return { ok: false, reason: "offline" };
+  }
+}
+
+export async function approveDailyAnswer(id: string): Promise<DailyAnswer | null> {
+  try {
+    const supabase = getSupabase();
+    if (!supabase || !id) return null;
+    const { data, error } = await supabase
+      .from("daily_answers")
+      .update({ status: "approved", is_hidden: false })
+      .eq("id", id)
+      .select(ANSWER_COLUMNS)
+      .single();
+    if (error || !data) return null;
+    return answerFromRow(data as AnswerRow);
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteDailyAnswer(id: string): Promise<boolean> {
+  try {
+    const supabase = getSupabase();
+    if (!supabase || !id) return false;
+    const { error } = await supabase.from("daily_answers").delete().eq("id", id);
+    return !error;
+  } catch {
+    return false;
   }
 }
 

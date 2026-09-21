@@ -1,9 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { CustomerAuthModal } from "@/components/CustomerAuthModal";
+import { GuestAvatarImage } from "@/components/GuestAvatarImage";
 import { tenantConfig } from "@/config/tenant.config";
-import { readCustomerProfile } from "@/lib/customerProfile";
-import { getActiveTableLabel } from "@/lib/tableSession";
+import {
+  readCustomerProfile,
+  type CustomerProfile,
+} from "@/lib/customerProfile";
+import { isGuestAvatarUrl } from "@/lib/guestAvatars";
 import {
   fetchActiveQuestion,
   fetchDailyAnswerById,
@@ -29,6 +34,7 @@ export function DailyQuestionFeed({
 }) {
   const copy = tenantConfig.copy.landing.gossip;
   const lastOwnId = useRef<string | null>(null);
+  const pendingSend = useRef(false);
   const [question, setQuestion] = useState<DailyQuestion | null>(null);
   const [answers, setAnswers] = useState<DailyAnswer[]>([]);
   const [draft, setDraft] = useState("");
@@ -38,6 +44,10 @@ export function DailyQuestionFeed({
   const [popId, setPopId] = useState<string | null>(null);
   const [waitMs, setWaitMs] = useState(0);
   const [ownHidden, setOwnHidden] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [profile, setProfile] = useState<CustomerProfile | null>(() =>
+    readCustomerProfile(),
+  );
 
   useEffect(() => {
     setLiked(readLikedGossipIds());
@@ -63,13 +73,14 @@ export function DailyQuestionFeed({
       }
       const nextAnswers = await fetchDailyAnswers(tenantId, {
         questionId: nextQuestion.id,
+        status: "approved",
       });
       if (active) setAnswers(nextAnswers);
       const ownId = lastOwnId.current;
       if (!ownId) return;
       const own = await fetchDailyAnswerById(ownId);
       if (!active) return;
-      setOwnHidden(!own || own.isHidden);
+      setOwnHidden(Boolean(own?.isHidden));
     })();
     return () => {
       active = false;
@@ -81,10 +92,13 @@ export function DailyQuestionFeed({
       onQuestion: (next) => {
         if (!next.isActive) return;
         setQuestion(next);
-        void fetchDailyAnswers(tenantId, { questionId: next.id }).then(setAnswers);
+        void fetchDailyAnswers(tenantId, {
+          questionId: next.id,
+          status: "approved",
+        }).then(setAnswers);
       },
       onAnswer: (answer) => {
-        if (answer.isHidden) return;
+        if (answer.isHidden || answer.status !== "approved") return;
         setQuestion((current) => {
           if (current && answer.questionId !== current.id) return current;
           setAnswers((list) => {
@@ -97,8 +111,13 @@ export function DailyQuestionFeed({
       onAnswerUpdate: (answer) => {
         if (lastOwnId.current === answer.id) setOwnHidden(answer.isHidden);
         setAnswers((list) => {
-          if (answer.isHidden) return list.filter((item) => item.id !== answer.id);
-          return list.map((item) => (item.id === answer.id ? answer : item));
+          if (answer.isHidden || answer.status !== "approved") {
+            return list.filter((item) => item.id !== answer.id);
+          }
+          if (list.some((item) => item.id === answer.id)) {
+            return list.map((item) => (item.id === answer.id ? answer : item));
+          }
+          return [answer, ...list];
         });
       },
       onAnswerDelete: (id) => {
@@ -108,21 +127,18 @@ export function DailyQuestionFeed({
     });
   }, [tenantId]);
 
-  function authorLabel() {
-    const profile = readCustomerProfile();
-    if (profile?.name) return profile.name;
-    return getActiveTableLabel(tenantId);
-  }
-
-  async function send() {
+  async function sendWithProfile(signedIn: CustomerProfile) {
     if (!question || busy || waitMs > 0) return;
     setNotice(null);
     setBusy(true);
     const result = await submitDailyAnswer({
       tenantId,
       questionId: question.id,
-      authorLabel: authorLabel(),
+      authorLabel: signedIn.name,
       body: draft,
+      avatarUrl: isGuestAvatarUrl(signedIn.avatarUrl)
+        ? signedIn.avatarUrl
+        : null,
     });
     setBusy(false);
     if (!result.ok) {
@@ -138,11 +154,37 @@ export function DailyQuestionFeed({
     lastOwnId.current = result.answer.id;
     setOwnHidden(false);
     setDraft("");
+    setWaitMs(gossipCooldownRemaining());
+    if (result.answer.status === "pending") {
+      setNotice(copy.pending);
+      return;
+    }
     setAnswers((list) => {
       if (list.some((item) => item.id === result.answer.id)) return list;
       return [result.answer, ...list];
     });
-    setWaitMs(gossipCooldownRemaining());
+  }
+
+  async function send() {
+    if (!question || busy || waitMs > 0) return;
+    const signedIn = profile ?? readCustomerProfile();
+    if (!signedIn?.name) {
+      pendingSend.current = Boolean(draft.trim());
+      setNotice(copy.authNeeded);
+      setAuthOpen(true);
+      return;
+    }
+    await sendWithProfile(signedIn);
+  }
+
+  function onAuthSaved(next: CustomerProfile) {
+    setProfile(next);
+    setAuthOpen(false);
+    setNotice(null);
+    if (pendingSend.current && draft.trim()) {
+      pendingSend.current = false;
+      void sendWithProfile(next);
+    }
   }
 
   async function like(id: string) {
@@ -168,23 +210,23 @@ export function DailyQuestionFeed({
   const showHiddenBanner = ownHidden;
 
   return (
-    <section className="rounded-3xl border-2 border-[var(--text-headline)]/15 bg-[var(--card-surface)] p-5 shadow-[0_5px_0_0_rgba(0,0,0,0.06)]">
-      <p className="text-xs font-black uppercase tracking-wider text-[var(--text-headline)]/60">
+    <section className="rounded-3xl border border-[var(--border)] bg-[var(--card-surface)] p-4 shadow-sm">
+      <p className="text-[11px] font-black uppercase tracking-wider text-[var(--text-body)]">
         {copy.kicker}
       </p>
       {question ? (
-        <h2 className="mt-1 font-sans text-lg font-black leading-snug text-[var(--text-headline)]">
+        <h2 className="mt-1 font-sans text-base font-extrabold leading-snug tracking-tight text-[var(--text-headline)]">
           {question.prompt}
         </h2>
       ) : (
-        <p className="mt-2 font-sans text-sm font-medium text-[var(--text-body)]">
+        <p className="mt-1.5 font-sans text-sm font-medium text-[var(--text-body)]">
           {copy.noQuestion}
         </p>
       )}
 
       {question ? (
         <form
-          className="mt-4"
+          className="mt-3"
           onSubmit={(event) => {
             event.preventDefault();
             void send();
@@ -223,7 +265,26 @@ export function DailyQuestionFeed({
               {copy.hiddenOwn.replace("{time}", formatGossipClock(waitMs))}
             </p>
           ) : notice ? (
-            <p className="mt-2 font-sans text-xs font-semibold text-red-600">{notice}</p>
+            <p
+              className={`mt-2 rounded-2xl px-3 py-2.5 text-center font-sans text-xs font-semibold leading-snug ${
+                notice === copy.pending || notice === copy.authNeeded
+                  ? "border border-[var(--border)] bg-[var(--bg-canvas)] text-[var(--text-headline)]"
+                  : "text-red-600"
+              }`}
+            >
+              {notice}
+            </p>
+          ) : !profile ? (
+            <button
+              type="button"
+              onClick={() => {
+                pendingSend.current = Boolean(draft.trim());
+                setAuthOpen(true);
+              }}
+              className="mt-2 w-full rounded-2xl border border-[var(--border)] bg-[var(--bg-canvas)] px-3 py-2.5 font-sans text-xs font-bold text-[var(--text-headline)] transition hover:brightness-95 active:scale-95"
+            >
+              {copy.authNeeded}
+            </button>
           ) : cooling ? (
             <p className="mt-2 font-sans text-xs font-medium text-[var(--text-body)]">
               {copy.wait}
@@ -233,30 +294,47 @@ export function DailyQuestionFeed({
       ) : null}
 
       {question ? (
-        <div className="mt-4 space-y-2">
+        <div className="mt-3 space-y-2">
           {visible.length === 0 ? (
-            <p className="px-3 py-6 text-center font-sans text-sm font-medium leading-relaxed text-[var(--text-body)]">
+            <p className="px-2 py-4 text-center font-sans text-sm font-medium leading-relaxed text-[var(--text-body)]">
               {copy.empty}
             </p>
           ) : (
             visible.map((item) => {
               const isLiked = liked.includes(item.id);
+              const avatarSrc = isGuestAvatarUrl(item.avatarUrl)
+                ? item.avatarUrl
+                : null;
               return (
                 <article
                   key={item.id}
-                  className="flex items-center gap-2 rounded-2xl border border-[var(--text-headline)]/10 bg-[var(--bg-canvas)] px-3 py-2.5"
+                  className="flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--bg-canvas)] px-3 py-2.5"
                 >
-                  <span className="shrink-0 rounded-full bg-[var(--btn-primary)] px-2 py-0.5 font-sans text-[10px] font-extrabold text-[var(--btn-text)]">
-                    {item.authorLabel}
-                  </span>
-                  <p className="min-w-0 flex-1 font-sans text-sm font-medium leading-snug text-[var(--text-headline)]">
-                    {item.body}
-                  </p>
+                  {avatarSrc ? (
+                    <span className="relative size-8 shrink-0 overflow-hidden rounded-full border border-[var(--border)] bg-[var(--card-surface)]">
+                      <GuestAvatarImage src={avatarSrc} sizes="32px" />
+                    </span>
+                  ) : (
+                    <span
+                      className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[var(--btn-primary)] font-sans text-[11px] font-extrabold text-[var(--btn-text)]"
+                      aria-hidden
+                    >
+                      {(item.authorLabel.trim().charAt(0) || "?").toUpperCase()}
+                    </span>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-sans text-[11px] font-extrabold text-[var(--text-headline)]">
+                      {item.authorLabel}
+                    </p>
+                    <p className="mt-0.5 font-sans text-sm font-medium leading-snug text-[var(--text-body)]">
+                      {item.body}
+                    </p>
+                  </div>
                   <button
                     type="button"
                     aria-label={isLiked ? copy.liked : copy.like}
                     onClick={() => void like(item.id)}
-                    className={`flex shrink-0 items-center gap-1 rounded-full px-1.5 py-1 text-[var(--text-headline)] transition-transform duration-150 ${
+                    className={`flex shrink-0 items-center gap-1 rounded-full px-1.5 py-1 text-[var(--text-headline)] transition-transform duration-150 active:scale-95 ${
                       popId === item.id ? "scale-125" : "scale-100"
                     }`}
                   >
@@ -271,6 +349,17 @@ export function DailyQuestionFeed({
           )}
         </div>
       ) : null}
+
+      <CustomerAuthModal
+        open={authOpen}
+        onClose={() => {
+          pendingSend.current = false;
+          setAuthOpen(false);
+        }}
+        onSaved={onAuthSaved}
+        title={copy.authTitle}
+        submitLabel={copy.authSubmit}
+      />
     </section>
   );
 }

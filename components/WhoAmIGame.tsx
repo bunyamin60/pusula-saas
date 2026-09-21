@@ -20,12 +20,63 @@ const WIN_CORRECT = 5;
 const FLASH_MS = 600;
 const COOLDOWN_MS = 1_200;
 const COUNTDOWN_MS = 700;
-const TILT_TRIGGER = 40;
-const TILT_NEUTRAL = 28;
+const TILT_TRIGGER = 38;
+const TILT_NEUTRAL = 22;
 
 type WhoAmIState = "setup" | "hold" | "playing" | "over";
 type FlashKind = "correct" | "pass" | null;
 type TiltZone = "neutral" | "down" | "up" | "mid";
+
+function isLandscapeViewport(): boolean {
+  if (typeof window === "undefined") return false;
+  if (typeof window.matchMedia === "function") {
+    return window.matchMedia("(orientation: landscape)").matches;
+  }
+  return window.innerWidth > window.innerHeight;
+}
+
+/** Screen angle in 0..359 (90 = landscape-primary, 270 = landscape-secondary). */
+function landscapeAngle(): number {
+  const angle = window.screen?.orientation?.angle;
+  if (typeof angle === "number" && Number.isFinite(angle)) {
+    return ((angle % 360) + 360) % 360;
+  }
+  const legacy = (window as Window & { orientation?: number }).orientation;
+  if (typeof legacy === "number" && Number.isFinite(legacy)) {
+    return ((legacy % 360) + 360) % 360;
+  }
+  return window.innerWidth >= window.innerHeight ? 90 : 0;
+}
+
+/**
+ * Forehead nod degrees (positive = chin up / pass, negative = chin down / correct).
+ * Landscape uses beta — gamma saturates near ±90 on the forehead and both tilts
+ * falsely read as "up"/pass.
+ */
+function nodRaw(event: DeviceOrientationEvent): number {
+  const beta = event.beta ?? 0;
+  const gamma = event.gamma ?? 0;
+  if (!isLandscapeViewport()) {
+    return beta - 90;
+  }
+  const angle = landscapeAngle();
+  // 90° / 270° flip which way beta grows when nodding.
+  if (angle >= 45 && angle < 135) return beta;
+  if (angle >= 225 && angle < 315) return -beta;
+  // Rare: CSS landscape but angle still 0/180 — fall back to signed gamma.
+  return angle >= 180 ? -gamma : gamma;
+}
+
+function nodDelta(event: DeviceOrientationEvent, baseline: number): number {
+  return nodRaw(event) - baseline;
+}
+
+function tiltZone(delta: number): TiltZone {
+  if (delta <= -TILT_TRIGGER) return "down";
+  if (delta >= TILT_TRIGGER) return "up";
+  if (Math.abs(delta) <= TILT_NEUTRAL) return "neutral";
+  return "mid";
+}
 
 type WhoAmISession = {
   state: WhoAmIState;
@@ -107,36 +158,6 @@ function writeSession(tenantId: string, session: WhoAmISession): void {
   } catch {
     // Private mode may block storage.
   }
-}
-
-function isLandscapeViewport(): boolean {
-  if (typeof window === "undefined") return false;
-  if (typeof window.matchMedia === "function") {
-    return window.matchMedia("(orientation: landscape)").matches;
-  }
-  return window.innerWidth > window.innerHeight;
-}
-
-/** Forehead nod angle relative to a calibrated baseline (degrees). */
-function nodDelta(event: DeviceOrientationEvent, baseline: number): number {
-  const beta = event.beta ?? 0;
-  const gamma = event.gamma ?? 0;
-  let nod: number;
-  if (isLandscapeViewport()) {
-    const type = window.screen?.orientation?.type ?? "";
-    // landscape-secondary flips the gamma sign vs primary.
-    nod = type.includes("secondary") ? -gamma : gamma;
-  } else {
-    nod = beta - 90;
-  }
-  return nod - baseline;
-}
-
-function tiltZone(delta: number): TiltZone {
-  if (delta <= -TILT_TRIGGER) return "down";
-  if (delta >= TILT_TRIGGER) return "up";
-  if (Math.abs(delta) <= TILT_NEUTRAL) return "neutral";
-  return "mid";
 }
 
 async function requestOrientationPermission(): Promise<void> {
@@ -374,7 +395,10 @@ export function WhoAmIGame() {
         if (zone === "neutral") needsNeutralRef.current = false;
         return;
       }
-      if (zone === "down") flashAndAdvance("correct");
+      if (zone === "down") {
+        flashAndAdvance("correct");
+        return;
+      }
       if (zone === "up") flashAndAdvance("pass");
     };
     window.addEventListener("deviceorientation", onOrient);

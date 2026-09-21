@@ -3,9 +3,14 @@ import {
   type PlayRewardProgress,
   type Recipe,
 } from "@/config/tenant.config";
-import { getActiveTenantId, getCampaignSettings } from "@/lib/campaignState";
+import {
+  clampRewardDuration,
+  getActiveTenantId,
+  getCampaignSettings,
+} from "@/lib/campaignState";
 import { getRecipeById } from "@/lib/matchRecipe";
 import { registerRewardCoupon } from "@/lib/rewardCoupons";
+import { getActiveTableLabel } from "@/lib/tableSession";
 
 const EMPTY: PlayRewardProgress = {
   elapsedSeconds: 0,
@@ -13,6 +18,7 @@ const EMPTY: PlayRewardProgress = {
   claimedCode: null,
   lastPing: 0,
   recipeId: null,
+  redeemedAt: null,
 };
 
 type Listener = () => void;
@@ -30,14 +36,16 @@ export function playRewardStorageKey(): string {
 
 export function playRewardTargetSeconds(): number {
   try {
-    const minutes = getCampaignSettings().durationMinutes;
-    if (Number.isInteger(minutes) && minutes >= 10 && minutes <= 45) {
-      return minutes * 60;
-    }
+    const minutes = clampRewardDuration(getCampaignSettings().durationMinutes);
+    return minutes * 60;
   } catch {
     // Campaign store may not be bound during the first SSR pass.
   }
   return tenantConfig.playReward.targetSeconds;
+}
+
+export function playRewardTargetMinutes(): number {
+  return Math.max(1, Math.round(playRewardTargetSeconds() / 60));
 }
 
 function emit() {
@@ -51,6 +59,7 @@ function mergeProgress(
   const target = playRewardTargetSeconds();
   const claimed = a.claimedCode || b.claimedCode;
   const recipeId = a.recipeId || b.recipeId;
+  const redeemedAt = a.redeemedAt || b.redeemedAt || null;
   const elapsed = Math.max(a.elapsedSeconds, b.elapsedSeconds);
   const unlocked =
     a.isUnlocked || b.isUnlocked || elapsed >= target || Boolean(claimed);
@@ -60,6 +69,7 @@ function mergeProgress(
     claimedCode: claimed,
     lastPing: Math.max(a.lastPing, b.lastPing),
     recipeId,
+    redeemedAt,
   };
 }
 
@@ -69,7 +79,8 @@ function sameProgress(a: PlayRewardProgress, b: PlayRewardProgress): boolean {
     a.isUnlocked === b.isUnlocked &&
     a.claimedCode === b.claimedCode &&
     a.lastPing === b.lastPing &&
-    (a.recipeId ?? null) === (b.recipeId ?? null)
+    (a.recipeId ?? null) === (b.recipeId ?? null) &&
+    (a.redeemedAt ?? null) === (b.redeemedAt ?? null)
   );
 }
 
@@ -175,6 +186,10 @@ function clampProgress(raw: Partial<PlayRewardProgress> | null): PlayRewardProgr
     typeof raw?.recipeId === "string" && raw.recipeId.trim()
       ? raw.recipeId
       : null;
+  const redeemedAt =
+    typeof raw?.redeemedAt === "string" && raw.redeemedAt.trim()
+      ? raw.redeemedAt
+      : null;
   const unlocked = Boolean(raw?.isUnlocked) || elapsed >= target || Boolean(claimed);
   return {
     elapsedSeconds: unlocked ? Math.max(elapsed, target) : Math.floor(elapsed),
@@ -182,6 +197,7 @@ function clampProgress(raw: Partial<PlayRewardProgress> | null): PlayRewardProgr
     claimedCode: claimed,
     lastPing: typeof raw?.lastPing === "number" && raw.lastPing > 0 ? raw.lastPing : 0,
     recipeId,
+    redeemedAt,
   };
 }
 
@@ -259,18 +275,29 @@ export function sealPlayRewardClaim(code: string, recipeId: string): PlayRewardP
         ? current.recipeId
         : recipeId,
     lastPing: Date.now(),
+    redeemedAt: current.redeemedAt ?? null,
   });
   const sealed = next.claimedCode || code;
   const recipe = getPlayRewardRecipe(next.recipeId);
   const rewardText =
     recipe?.name?.trim() || getCampaignSettings().hook.trim() || "";
+  const tenantId = getActiveTenantId();
   void registerRewardCoupon({
-    tenantId: getActiveTenantId(),
+    tenantId,
     code: sealed,
-    tableId: tenantConfig.brand.tableName,
+    tableId: getActiveTableLabel(tenantId),
     rewardText,
   });
   return next;
+}
+
+export function markPlayRewardRedeemed(redeemedAt?: string | null): PlayRewardProgress {
+  const current = getClientPlayReward();
+  if (!current.claimedCode) return current;
+  return persist({
+    ...current,
+    redeemedAt: redeemedAt || current.redeemedAt || new Date().toISOString(),
+  });
 }
 
 export function applyPlayRewardTick(

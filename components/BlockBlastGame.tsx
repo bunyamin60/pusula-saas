@@ -34,7 +34,7 @@ import {
 } from "@/lib/duelLeaderboard";
 import { confirmStampVisit } from "@/lib/stampCard";
 import { getActiveTableLabel } from "@/lib/tableSession";
-import { writeLobbyTab, writeVenueHomeView } from "@/lib/venueHome";
+import { writeLobbyRaceFocus, writeLobbyTab, writeVenueHomeView } from "@/lib/venueHome";
 
 const FINGER_LIFT = 50;
 const CLEAR_MS = 300;
@@ -961,6 +961,7 @@ export function BlockBlastGame({
                 onClick={() => {
                   writeVenueHomeView(tenantId, "lobby");
                   writeLobbyTab(tenantId, "events");
+                  writeLobbyRaceFocus(tenantId, "blockblast");
                   router.push(`/${tenantId}`);
                 }}
                 className="min-h-12 flex-1 rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-6 py-3.5 font-sans text-sm font-bold text-[var(--text-headline)] active:scale-95"

@@ -3,10 +3,16 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { tenantConfig } from "@/config/tenant.config";
 import {
+  getCampaignSettings,
+  getServerCampaign,
+  subscribeToCampaign,
+} from "@/lib/campaignState";
+import {
   applyPlayRewardTick,
   formatPlayClock,
   getClientPlayReward,
   getServerPlayReward,
+  playRewardTargetMinutes,
   playRewardTargetSeconds,
   sealPlayRewardClaim,
   subscribePlayReward,
@@ -18,7 +24,11 @@ export function useRewardTimer(isGameActive: boolean) {
     getClientPlayReward,
     getServerPlayReward,
   );
+  // Recompute target when admin changes ikram süresi.
+  useSyncExternalStore(subscribeToCampaign, getCampaignSettings, getServerCampaign);
+
   const targetSeconds = playRewardTargetSeconds();
+  const targetMinutes = playRewardTargetMinutes();
   const elapsedSeconds = Math.min(progress.elapsedSeconds, targetSeconds);
   const ratio = targetSeconds > 0 ? elapsedSeconds / targetSeconds : 0;
   const clockLabel = tenantConfig.copy.playReward.clockTemplate
@@ -52,17 +62,19 @@ export function useRewardTimer(isGameActive: boolean) {
       window.removeEventListener("focus", onVisibility);
       window.removeEventListener("pageshow", onVisibility);
     };
-  }, [isGameActive]);
+  }, [isGameActive, targetSeconds]);
 
   return {
     elapsedSeconds,
     targetSeconds,
+    targetMinutes,
     remainingSeconds: Math.max(0, targetSeconds - elapsedSeconds),
     progress: Math.min(1, Math.max(0, ratio)),
     isUnlocked: progress.isUnlocked || elapsedSeconds >= targetSeconds,
     isGameActive,
     isPaused: !isGameActive,
     claimedCode: progress.claimedCode,
+    redeemedAt: progress.redeemedAt ?? null,
     recipeId: progress.recipeId ?? null,
     clockLabel,
     pausedLabel: tenantConfig.copy.playReward.pausedLabel.replace(

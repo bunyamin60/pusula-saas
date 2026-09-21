@@ -177,6 +177,8 @@ export interface PlayRewardProgress {
   claimedCode: string | null;
   lastPing: number;
   recipeId?: string | null;
+  /** ISO timestamp once kasa marks the code redeemed */
+  redeemedAt?: string | null;
 }
 
 export interface WheelPrize {
@@ -1126,11 +1128,11 @@ export const tenantConfig = {
       instagramHandle: "@{handle}",
       tabs: {
         games: "Oyunlar",
-        events: "Etkinlikler",
-        surveys: "Anketler",
+        events: "Skorlar",
+        surveys: "Damgalar",
       },
-      eventsEmpty: "Bu mekânda henüz etkinlik yok.",
-      surveysEmpty: "Bu mekânda henüz anket yok.",
+      eventsEmpty: "Bu mekânda henüz skor tablosu yok.",
+      surveysEmpty: "Damga kartın burada görünecek.",
       race: {
         kicker: "Günün Rekabeti • Top 5",
         title: "Kafenin Bilgi Ustaları",
@@ -1162,6 +1164,8 @@ export const tenantConfig = {
         send: "Gönder",
         wait: "Aynı soruya 2 dakikada bir yanıt düşebilir.",
         blocked: "Bu mesaj gönderilemez.",
+        pending:
+          "Mesajınız alındı, onaylandıktan sonra yayınlanacak.",
         empty: "Henüz yanıt yok. İlk düşünceni sen paylaş!",
         hiddenOwn:
           "Son gönderdiğin yanıt denetim kuralları nedeniyle gizlendi. (Kalan süre: {time})",
@@ -1170,11 +1174,16 @@ export const tenantConfig = {
         like: "Beğen",
         liked: "Beğenildi",
         counter: "{used}/{max}",
+        authNeeded: "Yanıt göndermek için hızlı giriş yap.",
+        authTitle: "Yanıtlamak için hızlı giriş",
+        authSubmit: "Giriş Yap / Devam Et",
       },
       dock: {
         games: "Oyunlar",
+        events: "Skorlar",
+        surveys: "Damgalar",
         chat: "Sohbet",
-        profile: "Profil & Ödüllerim",
+        profile: "Profil",
       },
       profileLead: "Masadaki kimliğin bu oturumda skor ve sohbet kartlarında görünür.",
       profileTableLabel: "Mevcut Masa",
@@ -1453,7 +1462,7 @@ export const tenantConfig = {
       overLead: "Tahtada sığacak yer kalmadı.",
       rankTop: "Top 5’tesin — şu an #{rank}.",
       rankOther: "Sıralamada #{rank}. Bir üst basamak için biraz daha!",
-      rankFallback: "Skorun kaydedildi. Sıralamayı Etkinlikler’den takip et.",
+      rankFallback: "Skorun kaydedildi. Sıralamayı Skorlar’dan takip et.",
       overCta: "Tekrar Oyna",
       openLeaderboardCta: "Puan Tablosu",
       exitCta: "Masaya Dön",
@@ -1743,7 +1752,7 @@ export const tenantConfig = {
       followCta: "Instagram’da Takip Et",
     },
     playReward: {
-      barLabel: "20 dk oyna, ikramı kap",
+      barLabel: "{minutes} dk oyna, ikramı kap",
       clockTemplate: "{elapsed} / {target}",
       pausedLabel: "Oyun oynayarak süreyi ilerlet ({clock})",
       readyCta: "İkramın hazır",
@@ -1751,7 +1760,7 @@ export const tenantConfig = {
       readyOpen: "Al",
       congratsTitle: "İkramın Masanda!",
       congratsBody:
-        "20 dakikalık süreyi tamamladın. İkramını nasıl almak istersin?",
+        "{minutes} dakikalık süreyi tamamladın. İkramını nasıl almak istersin?",
       startCompass: "Ne İçeceğime Karar Veremedim (Damak Pusulası)",
       skipFunnelCta: "Kasa Kodunu Göster",
       questionProgress: "{current}/{total}",
@@ -1759,8 +1768,11 @@ export const tenantConfig = {
       directEyebrow: "İkramın hazır",
       resultCompassLead: "Hangisi sana yakışır emin değil misin? Kısa damak testiyle kahveni bul.",
       resultCompassCta: "Damak Pusulası’nı dene",
+      resultCompassAgainCta: "İçine sinmedi mi?",
       couponLabel: "Kasa kodu",
       couponHint: "Kupon kodunu kasada baristaya göstermen yeterlidir.",
+      couponUsedStamp: "Kullanıldı",
+      couponUsedBody: "Bu ikram kasada karşılandı. Afiyet olsun!",
       googleOptional: "Kafeyi Google’da değerlendir",
       close: "Kapat",
       back: "Geri",
@@ -1890,7 +1902,7 @@ export const tenantConfig = {
         hookPlaceholder: "Vitrin tatlısının yanına filtre kahve ikram",
         funnelLabel: "Ödül Öncesi Damak Pusulası Çözdür",
         funnelHint:
-          "Açıkken müşteri 20 dk sonunda 3 soruluk damak testini çözer ve önerilen reçeteyi alır. Kapalıyken süre biter bitmez doğrudan kupon kodu çıkar.",
+          "Açıkken müşteri belirleyeceğiniz süre sonunda 3 soruluk damak testini çözer ve önerilen reçeteyi alır. Kapalıyken süre biter bitmez doğrudan kupon kodu çıkar.",
         gamesLabel: "Oyun listesi",
         gamesHint: "Kapalı oyunlar müşteri vitrininde gizlenir.",
         gameLabels: {
@@ -1923,6 +1935,10 @@ export const tenantConfig = {
         publishError: "Soru yayınlanamadı.",
         moderationTitle: "Canlı yanıtlar",
         moderationEmpty: "Henüz yanıt yok.",
+        pendingTitle: "Onay bekleyen yanıtlar",
+        pendingEmpty: "Onay bekleyen yanıt yok.",
+        approve: "Onayla",
+        reject: "Reddet",
         hide: "Gizle / Sil",
         hidden: "Gizlendi",
         offline: "Bağlantı yok.",

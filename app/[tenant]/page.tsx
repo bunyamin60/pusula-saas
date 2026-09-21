@@ -28,7 +28,9 @@ export default function TenantHome() {
   const campaign = useCampaign();
   const params = useParams<{ tenant?: string }>();
   const tenantId = params.tenant ?? getActiveTenantId();
-  const [view, setView] = useState<VenueHomeView>("welcome");
+  const [view, setView] = useState<VenueHomeView>(() =>
+    typeof window === "undefined" ? "welcome" : readVenueHomeView(tenantId),
+  );
 
   useEffect(() => {
     const next = readVenueHomeView(tenantId);

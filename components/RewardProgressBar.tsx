@@ -23,9 +23,12 @@ export function RewardProgressBar({
     clockLabel,
     pausedLabel,
     openClaim,
+    targetMinutes,
+    redeemedAt,
   } = usePlayReward();
   const wasUnlocked = useRef(isUnlocked);
   const [burst, setBurst] = useState(false);
+  const barLabel = copy.barLabel.replace("{minutes}", String(targetMinutes));
 
   useEffect(() => {
     if (!isUnlocked || wasUnlocked.current) {
@@ -63,15 +66,21 @@ export function RewardProgressBar({
       >
         {burst ? <ConfettiBurst /> : null}
         <p className="min-w-0 truncate pr-3 font-sans text-sm font-bold text-[var(--btn-text)]">
-          {compact || embedded ? copy.readyCtaShort : copy.readyCta}
+          {redeemedAt
+            ? copy.couponUsedStamp
+            : compact || embedded
+              ? copy.readyCtaShort
+              : copy.readyCta}
         </p>
-        <button
-          type="button"
-          onClick={openClaim}
-          className="shrink-0 rounded-xl bg-[var(--bg-canvas)] px-3 py-2 font-sans text-xs font-bold text-[var(--text-headline)] transition hover:brightness-95 active:scale-95"
-        >
-          {copy.readyOpen}
-        </button>
+        {!redeemedAt ? (
+          <button
+            type="button"
+            onClick={openClaim}
+            className="shrink-0 rounded-xl bg-[var(--bg-canvas)] px-3 py-2 font-sans text-xs font-bold text-[var(--text-headline)] transition hover:brightness-95 active:scale-95"
+          >
+            {copy.readyOpen}
+          </button>
+        ) : null}
       </div>
     );
     return readyBar;
@@ -82,7 +91,7 @@ export function RewardProgressBar({
       <div className={shellClass}>
         <div className="flex items-center gap-2.5">
           <p className="min-w-0 flex-1 truncate text-left font-sans text-[11px] font-medium tracking-wide text-[var(--text-body)]">
-            {copy.barLabel}
+            {barLabel}
           </p>
           <div className="flex shrink-0 items-center gap-2">
             <div className="h-1.5 w-14 overflow-hidden rounded-full bg-[var(--text-headline)]/10">
@@ -110,7 +119,7 @@ export function RewardProgressBar({
     <div className={shellClass}>
       <div className="flex items-center gap-2">
         <p className="min-w-0 flex-1 truncate font-sans text-[11px] font-medium tracking-wide text-[var(--text-body)]">
-          {isPaused ? pausedLabel : copy.barLabel}
+          {isPaused ? pausedLabel : barLabel}
         </p>
         <p className="shrink-0 font-sans text-xs font-semibold tabular-nums text-[var(--text-headline)]">
           {clockLabel}

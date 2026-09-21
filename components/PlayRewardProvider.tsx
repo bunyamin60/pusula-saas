@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   useSyncExternalStore,
@@ -14,8 +15,10 @@ import { useRewardTimer } from "@/hooks/useRewardTimer";
 import {
   completePlayRewardNow,
   isPlaySessionActive,
+  markPlayRewardRedeemed,
   subscribePlaySession,
 } from "@/lib/playReward";
+import { fetchCouponRedemption } from "@/lib/rewardCoupons";
 
 type PlayRewardContextValue = ReturnType<typeof useRewardTimer> & {
   claimOpen: boolean;
@@ -33,7 +36,7 @@ export function PlayRewardProvider({
   children: ReactNode;
   extraActive?: boolean;
 }) {
-  const { inMatch, inDrawRoom } = useDuel();
+  const { tenantId, inMatch, inDrawRoom } = useDuel();
   const sessionActive = useSyncExternalStore(
     subscribePlaySession,
     isPlaySessionActive,
@@ -55,6 +58,35 @@ export function PlayRewardProvider({
     setClaimOpen(true);
   }, []);
 
+  // When kasa redeems the code, hide it on this device without a reload.
+  useEffect(() => {
+    const code = timer.claimedCode;
+    if (!tenantId || !code || timer.redeemedAt) return;
+
+    let alive = true;
+    const poll = async () => {
+      const status = await fetchCouponRedemption(tenantId, code);
+      if (!alive || !status.redeemed) return;
+      markPlayRewardRedeemed(status.redeemedAt);
+    };
+
+    void poll();
+    const timerId = window.setInterval(() => void poll(), 4000);
+    function onFocus() {
+      void poll();
+    }
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") onFocus();
+    });
+
+    return () => {
+      alive = false;
+      window.clearInterval(timerId);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [tenantId, timer.claimedCode, timer.redeemedAt]);
+
   const value = useMemo(
     () => ({
       ...timer,
@@ -68,15 +100,7 @@ export function PlayRewardProvider({
       closeClaim,
       completeDemo,
       openClaim,
-      timer.elapsedSeconds,
-      timer.isUnlocked,
-      timer.isGameActive,
-      timer.isPaused,
-      timer.claimedCode,
-      timer.recipeId,
-      timer.clockLabel,
-      timer.pausedLabel,
-      timer.progress,
+      timer,
     ],
   );
 

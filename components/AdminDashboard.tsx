@@ -22,6 +22,8 @@ import {
   type RewardCoupon,
 } from "@/lib/rewardCoupons";
 import {
+  approveDailyAnswer,
+  deleteDailyAnswer,
   fetchActiveQuestion,
   fetchDailyAnswers,
   hideDailyAnswer,
@@ -231,7 +233,7 @@ function KasaTab({ tenantId }: { tenantId: string }) {
     setBusy(true);
     const next = await redeemRewardCoupon(tenantId, code);
     setResult(next);
-    if (next.ok) await refreshHistory();
+    await refreshHistory();
     setBusy(false);
   }
 
@@ -781,20 +783,31 @@ function GossipTab({ tenantId }: { tenantId: string }) {
   const [prompt, setPrompt] = useState("");
   const [question, setQuestion] = useState<DailyQuestion | null>(null);
   const [answers, setAnswers] = useState<DailyAnswer[]>([]);
+  const [pending, setPending] = useState<DailyAnswer[]>([]);
   const [publishing, setPublishing] = useState(false);
   const [hidingId, setHidingId] = useState<string | null>(null);
+  const [actingId, setActingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<"published" | "publishError" | "offline" | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
 
   async function refresh() {
     const nextQuestion = await fetchActiveQuestion(tenantId);
     setQuestion(nextQuestion);
-    const nextAnswers = await fetchDailyAnswers(tenantId, {
-      questionId: nextQuestion?.id,
-      includeHidden: false,
-      limit: 20,
-    });
+    const [nextAnswers, nextPending] = await Promise.all([
+      fetchDailyAnswers(tenantId, {
+        questionId: nextQuestion?.id,
+        includeHidden: false,
+        limit: 20,
+        status: "approved",
+      }),
+      fetchDailyAnswers(tenantId, {
+        includeHidden: false,
+        limit: 40,
+        status: "pending",
+      }),
+    ]);
     setAnswers(nextAnswers);
+    setPending(nextPending);
   }
 
   useEffect(() => {
@@ -803,23 +816,54 @@ function GossipTab({ tenantId }: { tenantId: string }) {
       onQuestion: (next) => {
         if (next.isActive) {
           setQuestion(next);
-          void fetchDailyAnswers(tenantId, { includeHidden: false, limit: 20 }).then(
-            setAnswers,
-          );
+          void fetchDailyAnswers(tenantId, {
+            includeHidden: false,
+            limit: 20,
+            status: "approved",
+          }).then(setAnswers);
         }
       },
       onAnswer: (answer) => {
         if (answer.isHidden) return;
+        if (answer.status === "pending") {
+          setPending((list) => {
+            if (list.some((item) => item.id === answer.id)) return list;
+            return [answer, ...list].slice(0, 40);
+          });
+          return;
+        }
+        if (answer.status !== "approved") return;
         setAnswers((list) => {
           if (list.some((item) => item.id === answer.id)) return list;
           return [answer, ...list].slice(0, 20);
         });
       },
       onAnswerUpdate: (answer) => {
+        if (answer.status === "pending" && !answer.isHidden) {
+          setPending((list) => {
+            if (list.some((item) => item.id === answer.id)) {
+              return list.map((item) => (item.id === answer.id ? answer : item));
+            }
+            return [answer, ...list].slice(0, 40);
+          });
+          setAnswers((list) => list.filter((item) => item.id !== answer.id));
+          return;
+        }
+        setPending((list) => list.filter((item) => item.id !== answer.id));
+        if (answer.isHidden || answer.status !== "approved") {
+          setAnswers((list) => list.filter((item) => item.id !== answer.id));
+          return;
+        }
         setAnswers((list) => {
-          if (answer.isHidden) return list.filter((item) => item.id !== answer.id);
-          return list.map((item) => (item.id === answer.id ? answer : item));
+          if (list.some((item) => item.id === answer.id)) {
+            return list.map((item) => (item.id === answer.id ? answer : item));
+          }
+          return [answer, ...list].slice(0, 20);
         });
+      },
+      onAnswerDelete: (id) => {
+        setPending((list) => list.filter((item) => item.id !== id));
+        setAnswers((list) => list.filter((item) => item.id !== id));
       },
     });
   }, [tenantId]);
@@ -850,6 +894,44 @@ function GossipTab({ tenantId }: { tenantId: string }) {
       return;
     }
     setAnswers((list) => list.filter((item) => item.id !== id));
+  }
+
+  async function approve(id: string) {
+    setActingId(id);
+    const optimistic = pending.find((item) => item.id === id);
+    if (optimistic) {
+      setPending((list) => list.filter((item) => item.id !== id));
+      setAnswers((list) => {
+        const next = { ...optimistic, status: "approved" as const };
+        if (list.some((item) => item.id === id)) return list;
+        return [next, ...list].slice(0, 20);
+      });
+    }
+    const saved = await approveDailyAnswer(id);
+    setActingId(null);
+    if (!saved) {
+      setNotice("offline");
+      await refresh();
+      return;
+    }
+    setPending((list) => list.filter((item) => item.id !== saved.id));
+    setAnswers((list) => {
+      if (list.some((item) => item.id === saved.id)) {
+        return list.map((item) => (item.id === saved.id ? saved : item));
+      }
+      return [saved, ...list].slice(0, 20);
+    });
+  }
+
+  async function reject(id: string) {
+    setActingId(id);
+    setPending((list) => list.filter((item) => item.id !== id));
+    const ok = await deleteDailyAnswer(id);
+    setActingId(null);
+    if (!ok) {
+      setNotice("offline");
+      await refresh();
+    }
   }
 
   return (
@@ -897,6 +979,51 @@ function GossipTab({ tenantId }: { tenantId: string }) {
             ) : null}
           </p>
         ) : null}
+      </section>
+
+      <section className="rounded-3xl border border-[var(--border)] bg-[var(--card-surface)] p-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-body)]">
+          {copy.pendingTitle}
+        </p>
+        {pending.length === 0 ? (
+          <p className="mt-3 text-sm text-[var(--text-body)]">{copy.pendingEmpty}</p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {pending.map((item) => (
+              <li
+                key={item.id}
+                className="flex items-start gap-2 rounded-2xl border border-[var(--border)] bg-[var(--bg-canvas)] px-3 py-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="font-sans text-[10px] font-extrabold uppercase tracking-wide text-[var(--text-body)]">
+                    {item.authorLabel}
+                  </p>
+                  <p className="mt-1 font-sans text-sm font-medium leading-snug text-[var(--text-headline)]">
+                    {item.body}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-col gap-1.5">
+                  <button
+                    type="button"
+                    disabled={actingId === item.id}
+                    onClick={() => void approve(item.id)}
+                    className="min-h-10 rounded-xl bg-emerald-500/90 px-3 py-2 font-sans text-[11px] font-extrabold text-white transition hover:brightness-95 active:scale-95 disabled:opacity-40"
+                  >
+                    {copy.approve}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={actingId === item.id}
+                    onClick={() => void reject(item.id)}
+                    className="min-h-10 rounded-xl bg-red-500/90 px-3 py-2 font-sans text-[11px] font-extrabold text-white transition hover:brightness-95 active:scale-95 disabled:opacity-40"
+                  >
+                    {copy.reject}
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="rounded-3xl border border-[var(--text-headline)]/10 bg-[var(--card-surface)] p-4">

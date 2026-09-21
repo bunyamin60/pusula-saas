@@ -18,7 +18,7 @@ import {
   type QuizQuestion,
 } from "@/lib/quizBank";
 import { getActiveTableLabel } from "@/lib/tableSession";
-import { writeLobbyTab, writeVenueHomeView } from "@/lib/venueHome";
+import { writeLobbyRaceFocus, writeLobbyTab, writeVenueHomeView } from "@/lib/venueHome";
 
 const LETTERS = ["A", "B", "C", "D"] as const;
 const CATEGORY_IDS = [
@@ -114,6 +114,7 @@ export function CafeQuiz() {
   function openLeaderboard() {
     writeVenueHomeView(tenantId, "lobby");
     writeLobbyTab(tenantId, "events");
+    writeLobbyRaceFocus(tenantId, "quiz");
     router.push(`/${tenantId}`);
   }
 

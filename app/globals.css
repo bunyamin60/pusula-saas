@@ -59,6 +59,17 @@
   animation: loading-spin 4s linear infinite;
 }
 
+.loading-orbit .loading-bean {
+  animation: loading-bean-tumble 4s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes loading-bean-tumble {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 html {
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
