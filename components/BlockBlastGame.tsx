@@ -450,15 +450,6 @@ export function BlockBlastGame({
       origin: { y: 0.42 },
       colors: themeConfettiColors(),
     });
-    void (async () => {
-      for (const _mark of pending) {
-        await confirmStampVisit({
-          tenantId,
-          clientId: player.clientId,
-          tableId: getActiveTableLabel(tenantId),
-        });
-      }
-    })();
   }, [copy.rewardGoal, persist, player.clientId, session, tenantId]);
 
   useEffect(() => {
@@ -478,6 +469,13 @@ export function BlockBlastGame({
     }).then((entry) => {
       setOverEntry(entry);
       setOverRankReady(true);
+    });
+    void confirmStampVisit({
+      tenantId,
+      clientId: player.clientId,
+      tableId: getActiveTableLabel(tenantId),
+      activityName: "blockblast",
+      score: session.score,
     });
   }, [player.avatar, player.clientId, session, tenantId]);
 

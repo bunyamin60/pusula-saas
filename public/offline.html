@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#fffffe" />
+    <title>Bağlantı Koptu!</title>
+    <style>
+      :root {
+        --bg-canvas: #fffffe;
+        --text-headline: #272343;
+        --text-body: #2d334a;
+        --btn-primary: #ffd803;
+        --btn-text: #272343;
+        --card-surface: #e3f6f5;
+        --card-border: color-mix(in srgb, #272343 20%, transparent);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: var(--bg-canvas);
+        color: var(--text-headline);
+        font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system,
+          BlinkMacSystemFont, "Segoe UI", sans-serif;
+        -webkit-tap-highlight-color: transparent;
+      }
+      main {
+        display: flex;
+        min-height: 100dvh;
+        width: 100%;
+        justify-content: center;
+        user-select: none;
+      }
+      section {
+        display: flex;
+        width: 100%;
+        max-width: 28rem;
+        min-height: 100dvh;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: max(1.5rem, env(safe-area-inset-top)) 1.5rem
+          max(1.5rem, env(safe-area-inset-bottom));
+        text-align: center;
+      }
+      .icon-wrap {
+        margin-bottom: 1rem;
+        border-radius: 9999px;
+        border: 1px solid var(--card-border);
+        background: var(--card-surface);
+        padding: 1.25rem;
+      }
+      .icon-wrap svg {
+        display: block;
+        width: 2.5rem;
+        height: 2.5rem;
+      }
+      h1 {
+        margin: 0;
+        font-size: 1.5rem;
+        font-weight: 800;
+        letter-spacing: -0.025em;
+        line-height: 1.2;
+      }
+      p {
+        margin: 0.75rem 0 0;
+        max-width: 20rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+        line-height: 1.5;
+        color: var(--text-body);
+      }
+      button {
+        display: inline-flex;
+        margin-top: 2rem;
+        width: 100%;
+        max-width: 20rem;
+        min-height: 3rem;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        border: 0;
+        border-radius: 1rem;
+        background: var(--btn-primary);
+        color: var(--btn-text);
+        padding: 0.875rem 1.5rem;
+        font: inherit;
+        font-size: 1rem;
+        font-weight: 800;
+        cursor: pointer;
+        touch-action: manipulation;
+        box-shadow: 0 1px 2px color-mix(in srgb, var(--btn-primary) 20%, transparent);
+      }
+      button:active {
+        transform: scale(0.95);
+        filter: brightness(0.95);
+      }
+      button svg {
+        width: 1.25rem;
+        height: 1.25rem;
+        flex-shrink: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section>
+        <div class="icon-wrap" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h.01" />
+            <path d="M8.5 16.429a5 5 0 0 1 7 0" />
+            <path d="M5 12.859a10 10 0 0 1 5.17-2.69" />
+            <path d="M19 12.859a10 10 0 0 0-2.007-1.523" />
+            <path d="M2 8.82a15 15 0 0 1 4.177-2.318" />
+            <path d="M22 8.82a15 15 0 0 0-11.288-3.764" />
+            <path d="m2 2 20 20" />
+          </svg>
+        </div>
+        <h1>Bağlantı Koptu!</h1>
+        <p>
+          Kafenin Wi-Fi ağı biraz dalgalanıyor olabilir. Masanın keyfini kaçırma,
+          bağlantın gelince oyun hazır!
+        </p>
+        <button type="button" onclick="location.reload()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+            <path d="M21 3v5h-5" />
+            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+            <path d="M8 16H3v5" />
+          </svg>
+          Tekrar Dene
+        </button>
+      </section>
+    </main>
+  </body>
+</html>

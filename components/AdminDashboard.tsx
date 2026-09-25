@@ -32,6 +32,15 @@ import {
   type DailyAnswer,
   type DailyQuestion,
 } from "@/lib/dailyQuestion";
+import {
+  approveStampRequest,
+  fetchXpConfigs,
+  listPendingStampRequests,
+  saveXpConfig,
+  subscribeStampRequests,
+  type StampRequestPayload,
+  type XpConfigRow,
+} from "@/lib/economy";
 import { adminPasswordAccepted } from "@/lib/adminAuth";
 import {
   DEFAULT_TENANT_ID,
@@ -219,14 +228,28 @@ function KasaTab({ tenantId }: { tenantId: string }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<RedeemCouponResult | null>(null);
   const [history, setHistory] = useState<RewardCoupon[]>([]);
+  const [stampRequests, setStampRequests] = useState<StampRequestPayload[]>([]);
+  const [stampBusyId, setStampBusyId] = useState<string | null>(null);
+  const [stampNotice, setStampNotice] = useState<string | null>(null);
 
   const refreshHistory = useCallback(async () => {
     setHistory(await listTodayRedeemedCoupons(tenantId));
   }, [tenantId]);
 
+  const refreshStamps = useCallback(async () => {
+    setStampRequests(await listPendingStampRequests(tenantId));
+  }, [tenantId]);
+
   useEffect(() => {
     void refreshHistory();
-  }, [refreshHistory]);
+    void refreshStamps();
+  }, [refreshHistory, refreshStamps]);
+
+  useEffect(() => {
+    return subscribeStampRequests(tenantId, () => {
+      void refreshStamps();
+    });
+  }, [refreshStamps, tenantId]);
 
   async function redeem(event: FormEvent) {
     event.preventDefault();
@@ -235,6 +258,23 @@ function KasaTab({ tenantId }: { tenantId: string }) {
     setResult(next);
     await refreshHistory();
     setBusy(false);
+  }
+
+  async function approveStamp(requestId: string) {
+    setStampBusyId(requestId);
+    setStampNotice(null);
+    const next = await approveStampRequest({
+      tenantId,
+      requestId,
+      adminPassword: campaign.adminPassword,
+    });
+    setStampBusyId(null);
+    if (!next.ok) {
+      setStampNotice(desk.stampsError);
+      return;
+    }
+    setStampNotice(desk.stampsApproved);
+    await refreshStamps();
   }
 
   const usedMessage =
@@ -246,6 +286,49 @@ function KasaTab({ tenantId }: { tenantId: string }) {
 
   return (
     <div className="space-y-4">
+      <section className="space-y-3 rounded-3xl border border-[var(--text-headline)]/10 bg-[var(--card-surface)] p-4">
+        <h3 className="font-sans text-sm font-extrabold text-[var(--text-headline)]">
+          {desk.stampsTitle}
+        </h3>
+        {stampRequests.length === 0 ? (
+          <p className="font-sans text-sm font-medium text-[var(--text-body)]">
+            {desk.stampsEmpty}
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {stampRequests.map((item) => (
+              <li
+                key={item.id}
+                className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--text-headline)]/10 bg-[var(--bg-canvas)] px-3 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="font-sans text-base font-extrabold tabular-nums text-[var(--text-headline)]">
+                    {item.table_label
+                      ? desk.stampsTable
+                          .replace("{table}", item.table_label)
+                          .replace("{code}", item.code)
+                      : desk.stampsCode.replace("{code}", item.code)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={stampBusyId === item.id}
+                  onClick={() => void approveStamp(item.id)}
+                  className="shrink-0 rounded-xl bg-[var(--btn-primary)] px-3 py-2 font-sans text-[11px] font-extrabold text-[var(--btn-text)] transition active:scale-95 disabled:opacity-40"
+                >
+                  {desk.stampsApprove}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {stampNotice ? (
+          <p className="font-sans text-xs font-semibold text-[var(--text-headline)]">
+            {stampNotice}
+          </p>
+        ) : null}
+      </section>
+
       <p className="text-sm leading-relaxed text-[var(--text-body)]">{desk.lead}</p>
       <form onSubmit={(event) => void redeem(event)} className="space-y-4">
         {result?.ok ? (
@@ -359,6 +442,9 @@ function VenueTab() {
     clampRewardDuration(campaign.durationMinutes || 20),
   );
   const [games, setGames] = useState<EnabledGames>(campaign.enabledGames);
+  const [venueMode, setVenueMode] = useState<"masa" | "kasa">(
+    campaign.venueMode === "kasa" ? "kasa" : "masa",
+  );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(false);
@@ -377,6 +463,7 @@ function VenueTab() {
     setHook(campaign.hook);
     setMinutes(clampRewardDuration(campaign.durationMinutes || 20));
     setGames(campaign.enabledGames);
+    setVenueMode(campaign.venueMode === "kasa" ? "kasa" : "masa");
   }, [
     campaign.brandName,
     campaign.logoUrl,
@@ -384,6 +471,7 @@ function VenueTab() {
     campaign.hook,
     campaign.durationMinutes,
     campaign.enabledGames,
+    campaign.venueMode,
   ]);
 
   async function persist(nextPalette: GuestPaletteId = paletteId) {
@@ -402,6 +490,7 @@ function VenueTab() {
         hook: rewardTitle,
         durationMinutes,
         enabledGames: games,
+        venueMode,
       });
       setSaved(true);
     } catch {
@@ -435,6 +524,38 @@ function VenueTab() {
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-body)]">
           {desk.identityTitle}
         </p>
+        <div className="mt-4 rounded-2xl border border-[var(--text-headline)]/10 bg-[var(--bg-canvas)] p-3">
+          <p className="font-sans text-xs font-extrabold text-[var(--text-headline)]">
+            {desk.modeTitle}
+          </p>
+          <p className="mt-1 font-sans text-[11px] font-medium text-[var(--text-body)]">
+            {desk.modeHint}
+          </p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {(
+              [
+                ["masa", desk.modeMasa],
+                ["kasa", desk.modeKasa],
+              ] as const
+            ).map(([id, label]) => {
+              const active = venueMode === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setVenueMode(id)}
+                  className={`min-h-12 rounded-xl px-3 font-sans text-sm font-extrabold transition active:scale-95 ${
+                    active
+                      ? "bg-[var(--btn-primary)] text-[var(--btn-text)]"
+                      : "border border-[var(--text-headline)]/10 bg-[var(--card-surface)] text-[var(--text-headline)]"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
         <label className="mt-4 block">
           <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-body)]">
             {desk.brandLabel}
@@ -1068,11 +1189,17 @@ function MetricsTab({ tenantId }: { tenantId: string }) {
   const copy = tenantConfig.copy.desk.metrics;
   const campaign = useCampaign();
   const [metrics, setMetrics] = useState<CouponMetrics | null>(null);
+  const [configs, setConfigs] = useState<XpConfigRow[]>([]);
+  const [xpBusy, setXpBusy] = useState<string | null>(null);
+  const [xpNotice, setXpNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     void fetchCouponMetrics(tenantId).then((next) => {
       if (alive) setMetrics(next);
+    });
+    void fetchXpConfigs(tenantId).then((next) => {
+      if (alive) setConfigs(next);
     });
     return () => {
       alive = false;
@@ -1098,6 +1225,18 @@ function MetricsTab({ tenantId }: { tenantId: string }) {
     },
   ];
 
+  async function saveRow(row: XpConfigRow) {
+    setXpBusy(row.id);
+    setXpNotice(null);
+    const result = await saveXpConfig({
+      tenantId,
+      adminPassword: campaign.adminPassword,
+      config: row,
+    });
+    setXpBusy(null);
+    setXpNotice(result.ok ? copy.xpSaved : copy.xpError);
+  }
+
   return (
     <div className="space-y-3">
       {cards.map((card) => (
@@ -1114,6 +1253,108 @@ function MetricsTab({ tenantId }: { tenantId: string }) {
       {metrics && metrics.issuedCount === 0 ? (
         <p className="px-1 text-sm text-[var(--text-body)]">{copy.empty}</p>
       ) : null}
+
+      <section className="rounded-3xl border border-[var(--text-headline)]/10 bg-[var(--card-surface)] p-4">
+        <h3 className="font-sans text-sm font-extrabold text-[var(--text-headline)]">
+          {copy.xpTitle}
+        </h3>
+        <p className="mt-1 font-sans text-xs font-medium text-[var(--text-body)]">
+          {copy.xpLead}
+        </p>
+        <ul className="mt-3 space-y-3">
+          {configs.map((row) => (
+            <li
+              key={row.id}
+              className="rounded-2xl border border-[var(--text-headline)]/10 bg-[var(--bg-canvas)] p-3"
+            >
+              <p className="font-sans text-sm font-extrabold text-[var(--text-headline)]">
+                {row.label || row.activity_name}
+              </p>
+              <p className="mt-0.5 font-sans text-[10px] font-bold uppercase tracking-wide text-[var(--text-body)]">
+                {copy.xpActivity}: {row.activity_name}
+              </p>
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                <label className="block text-[10px] font-bold text-[var(--text-body)]">
+                  {copy.xpBase}
+                  <input
+                    type="number"
+                    value={row.base_xp}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      setConfigs((list) =>
+                        list.map((item) =>
+                          item.id === row.id
+                            ? { ...item, base_xp: Number.isFinite(value) ? value : 0 }
+                            : item,
+                        ),
+                      );
+                    }}
+                    className="mt-1 w-full rounded-xl border border-[var(--text-headline)]/10 bg-[var(--card-surface)] px-2 py-2 font-sans text-sm text-[var(--text-headline)]"
+                  />
+                </label>
+                <label className="block text-[10px] font-bold text-[var(--text-body)]">
+                  {copy.xpMultiplier}
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={row.multiplier}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      setConfigs((list) =>
+                        list.map((item) =>
+                          item.id === row.id
+                            ? {
+                                ...item,
+                                multiplier: Number.isFinite(value) ? value : 0,
+                              }
+                            : item,
+                        ),
+                      );
+                    }}
+                    className="mt-1 w-full rounded-xl border border-[var(--text-headline)]/10 bg-[var(--card-surface)] px-2 py-2 font-sans text-sm text-[var(--text-headline)]"
+                  />
+                </label>
+                <label className="block text-[10px] font-bold text-[var(--text-body)]">
+                  {copy.xpMax}
+                  <input
+                    type="number"
+                    value={row.max_xp_per_action}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      setConfigs((list) =>
+                        list.map((item) =>
+                          item.id === row.id
+                            ? {
+                                ...item,
+                                max_xp_per_action: Number.isFinite(value)
+                                  ? value
+                                  : 1,
+                              }
+                            : item,
+                        ),
+                      );
+                    }}
+                    className="mt-1 w-full rounded-xl border border-[var(--text-headline)]/10 bg-[var(--card-surface)] px-2 py-2 font-sans text-sm text-[var(--text-headline)]"
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                disabled={xpBusy === row.id}
+                onClick={() => void saveRow(row)}
+                className="mt-2 min-h-11 w-full rounded-xl bg-[var(--btn-primary)] px-3 font-sans text-xs font-extrabold text-[var(--btn-text)] transition active:scale-95 disabled:opacity-40"
+              >
+                {copy.xpSave}
+              </button>
+            </li>
+          ))}
+        </ul>
+        {xpNotice ? (
+          <p className="mt-2 font-sans text-xs font-semibold text-[var(--text-headline)]">
+            {xpNotice}
+          </p>
+        ) : null}
+      </section>
     </div>
   );
 }

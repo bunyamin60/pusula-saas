@@ -24,6 +24,7 @@ import {
   type DailyAnswer,
   type DailyQuestion,
 } from "@/lib/dailyQuestion";
+import { awardXp } from "@/lib/economy";
 
 export function DailyQuestionFeed({
   tenantId,
@@ -155,10 +156,17 @@ export function DailyQuestionFeed({
     setOwnHidden(false);
     setDraft("");
     setWaitMs(gossipCooldownRemaining());
-    if (result.answer.status === "pending") {
+    const xp = await awardXp({
+      tenantId,
+      clientId,
+      activityName: "gunun_sorusu",
+    });
+    if (xp.ok && xp.capped && xp.granted === 0) {
+      setNotice(tenantConfig.copy.landing.stamps.xpCapped);
+    } else if (result.answer.status === "pending") {
       setNotice(copy.pending);
-      return;
     }
+    if (result.answer.status === "pending") return;
     setAnswers((list) => {
       if (list.some((item) => item.id === result.answer.id)) return list;
       return [result.answer, ...list];

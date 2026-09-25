@@ -94,6 +94,15 @@ function answerFromRow(row: AnswerRow): DailyAnswer {
   };
 }
 
+function asAnswerRow(value: unknown): AnswerRow | null {
+  if (!value || typeof value !== "object") return null;
+  return value as AnswerRow;
+}
+
+function asAnswerRows(value: unknown): AnswerRow[] {
+  return Array.isArray(value) ? (value as AnswerRow[]) : [];
+}
+
 function readNumber(key: string): number | null {
   if (typeof window === "undefined") return null;
   try {
@@ -241,7 +250,7 @@ export async function fetchDailyAnswers(
         ({ data, error } = await run(ANSWER_COLUMNS_LEGACY));
       }
       if (error || !Array.isArray(data)) return [];
-      const mapped = (data as AnswerRow[]).map(answerFromRow);
+      const mapped = asAnswerRows(data).map(answerFromRow);
       if (status === "pending") return [];
       return mapped.filter((entry) => options?.includeHidden || !entry.isHidden);
     }
@@ -249,7 +258,7 @@ export async function fetchDailyAnswers(
       ({ data, error } = await run(ANSWER_COLUMNS_LEGACY));
     }
     if (error || !Array.isArray(data)) return [];
-    return (data as AnswerRow[])
+    return asAnswerRows(data)
       .map(answerFromRow)
       .filter((entry) => options?.includeHidden || !entry.isHidden);
   } catch {
@@ -283,7 +292,8 @@ export async function fetchDailyAnswerById(
         .maybeSingle());
     }
     if (error || !data) return null;
-    return answerFromRow(data as AnswerRow);
+    const row = asAnswerRow(data);
+    return row ? answerFromRow(row) : null;
   } catch {
     return null;
   }
@@ -398,43 +408,50 @@ export async function submitDailyAnswer(input: {
       like_count: 0,
       status: moderated.status,
     };
+    const withAvatar = avatarUrl
+      ? { ...base, avatar_url: avatarUrl }
+      : base;
+    let row: AnswerRow | null = null;
     let { data, error } = await supabase
       .from("daily_answers")
-      .insert(avatarUrl ? { ...base, avatar_url: avatarUrl } : base)
+      .insert(withAvatar as never)
       .select(ANSWER_COLUMNS)
       .single();
     if (error && /status/i.test(error.message)) {
       const { status: _status, ...withoutStatus } = base;
+      const payload = avatarUrl
+        ? { ...withoutStatus, avatar_url: avatarUrl }
+        : withoutStatus;
       ({ data, error } = await supabase
         .from("daily_answers")
-        .insert(
-          avatarUrl
-            ? { ...withoutStatus, avatar_url: avatarUrl }
-            : withoutStatus,
-        )
+        .insert(payload as never)
         .select(ANSWER_COLUMNS_NO_STATUS)
         .single());
-      if (!error && data && moderated.status === "pending") {
+      row = asAnswerRow(data);
+      if (!error && row && moderated.status === "pending") {
         // Column missing: fall back to hidden so it stays off the public feed.
         await supabase
           .from("daily_answers")
           .update({ is_hidden: true })
-          .eq("id", (data as AnswerRow).id);
-        data = { ...(data as AnswerRow), is_hidden: true, status: "pending" };
+          .eq("id", row.id);
+        row = { ...row, is_hidden: true, status: "pending" };
       }
+    } else {
+      row = asAnswerRow(data);
     }
     if (error && /avatar_url/i.test(error.message)) {
       const { status: _s, ...rest } = base;
       ({ data, error } = await supabase
         .from("daily_answers")
-        .insert(rest)
+        .insert(rest as never)
         .select(ANSWER_COLUMNS_LEGACY)
         .single());
+      row = asAnswerRow(data);
     }
-    if (error || !data) return { ok: false, reason: "offline" };
+    if (error || !row) return { ok: false, reason: "offline" };
     markGossipSent();
-    rememberLastGossipAnswer(data.id);
-    const answer = answerFromRow(data as AnswerRow);
+    rememberLastGossipAnswer(row.id);
+    const answer = answerFromRow(row);
     return {
       ok: true,
       answer: {
@@ -458,7 +475,8 @@ export async function approveDailyAnswer(id: string): Promise<DailyAnswer | null
       .select(ANSWER_COLUMNS)
       .single();
     if (error || !data) return null;
-    return answerFromRow(data as AnswerRow);
+    const row = asAnswerRow(data);
+    return row ? answerFromRow(row) : null;
   } catch {
     return null;
   }

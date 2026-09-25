@@ -278,6 +278,7 @@ export function TabooGame() {
       tenantId,
       clientId: player.clientId,
       tableId: tenantConfig.brand.tableName,
+      activityName: "taboo",
     }).then(() => {
       const current = sessionRef.current;
       if (!current) return;

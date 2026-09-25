@@ -339,6 +339,7 @@ export function WhoAmIGame() {
       tenantId,
       clientId: player.clientId,
       tableId: getActiveTableLabel(tenantId),
+      activityName: "whoami",
     }).then(() => {
       const current = sessionRef.current;
       if (!current) return;

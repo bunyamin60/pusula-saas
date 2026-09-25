@@ -11,6 +11,7 @@ import {
   submitQuizScore,
   type QuizLeaderboardEntry,
 } from "@/lib/duelLeaderboard";
+import { awardXp } from "@/lib/economy";
 import {
   getQuizCategory,
   quizCategoryTitle,
@@ -80,6 +81,12 @@ export function CafeQuiz() {
       if (cancelled) return;
       setSubmitted(entry);
       setBoardReady(true);
+    });
+    void awardXp({
+      tenantId,
+      clientId: player.clientId,
+      activityName: "quiz",
+      score: scoreRef.current,
     });
     return () => {
       cancelled = true;

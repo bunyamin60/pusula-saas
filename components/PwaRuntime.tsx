@@ -25,7 +25,7 @@ export function PwaRuntime({ tenantId }: { tenantId: string }) {
 
   useEffect(() => {
     if ("serviceWorker" in navigator) {
-      void navigator.serviceWorker.register("/sw.js").catch(() => {
+      void navigator.serviceWorker.register("/sw.js?v=2").catch(() => {
         // Registration is optional on unsupported browsers.
       });
     }

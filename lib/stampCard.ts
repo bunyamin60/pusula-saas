@@ -1,9 +1,9 @@
-import { tenantConfig } from "@/config/tenant.config";
+import { awardXp, STAMP_GOAL as ECONOMY_STAMP_GOAL } from "@/lib/economy";
 import { readCustomerProfile } from "@/lib/customerProfile";
-import { registerRewardCoupon } from "@/lib/rewardCoupons";
 import { getSupabase } from "@/lib/supabase";
 
-export const STAMP_GOAL = 5;
+/** @deprecated Use STAMP_GOAL from @/lib/economy (6). Kept for import compatibility. */
+export const STAMP_GOAL = ECONOMY_STAMP_GOAL;
 
 export type StampCardState = {
   count: number;
@@ -18,12 +18,6 @@ function canUseStorage(): boolean {
 
 export function stampStorageKey(tenantId: string, clientId: string): string {
   return `loyalty_stamps_${tenantId}_${clientId}`;
-}
-
-export function makeStampCouponCode(): string {
-  const prefix = tenantConfig.playReward.codePrefix;
-  const n = Math.floor(1000 + Math.random() * 9000);
-  return `${prefix}5KAHVE-${n}`;
 }
 
 function clampCount(value: unknown): number {
@@ -113,32 +107,6 @@ async function fetchRemoteCount(
   }
 }
 
-async function persistRemote(
-  tenantId: string,
-  clientId: string,
-  count: number,
-  lastCode: string | null,
-): Promise<void> {
-  try {
-    const supabase = getSupabase();
-    if (!supabase || !tenantId || !clientId) return;
-    const profile = readCustomerProfile();
-    await supabase.from("customers").upsert(
-      {
-        tenant_id: tenantId,
-        client_id: clientId,
-        stamp_count: count,
-        last_coupon_code: lastCode,
-        updated_at: new Date().toISOString(),
-        ...(profile?.name ? { nickname: profile.name } : {}),
-      },
-      { onConflict: "tenant_id,client_id" },
-    );
-  } catch {
-    // Local card still works if the table is missing.
-  }
-}
-
 export async function loadStampCard(
   tenantId: string,
   clientId: string,
@@ -146,42 +114,52 @@ export async function loadStampCard(
   const local = readStampCard(tenantId, clientId);
   const remote = await fetchRemoteCount(tenantId, clientId);
   if (remote == null) return local;
-  const next = writeStampCard(tenantId, clientId, {
-    count: Math.max(local.count, remote),
+  return writeStampCard(tenantId, clientId, {
+    count: remote,
     lastCode: local.lastCode,
   });
-  if (next.count !== remote) await persistRemote(tenantId, clientId, next.count, next.lastCode);
-  return next;
 }
 
+/**
+ * Legacy game hook — no longer grants stamps (anti-cheat).
+ * Awards server-validated XP for the given activity instead.
+ */
 export async function confirmStampVisit(input: {
   tenantId: string;
   clientId: string;
   tableId: string;
+  activityName?: string;
+  score?: number;
 }): Promise<StampCardState> {
-  const current = readStampCard(input.tenantId, input.clientId);
-  const nextCount = Math.min(STAMP_GOAL, current.count + 1);
-  if (nextCount < STAMP_GOAL) {
-    const next = writeStampCard(input.tenantId, input.clientId, {
-      count: nextCount,
-      lastCode: null,
-    });
-    await persistRemote(input.tenantId, input.clientId, next.count, next.lastCode);
-    return next;
-  }
-
-  const code = makeStampCouponCode();
-  const rewardText = tenantConfig.copy.landing.stamps.rewarded.replace("{code}", code);
-  await registerRewardCoupon({
+  void input.tableId;
+  await awardXp({
     tenantId: input.tenantId,
-    code,
-    tableId: input.tableId,
-    rewardText,
+    clientId: input.clientId,
+    activityName: input.activityName ?? "mini_oyun",
+    score: input.score ?? null,
   });
-  const next = writeStampCard(input.tenantId, input.clientId, {
-    count: 0,
-    lastCode: code,
-  });
-  await persistRemote(input.tenantId, input.clientId, 0, code);
-  return next;
+  return loadStampCard(input.tenantId, input.clientId);
+}
+
+export async function syncStampNickname(
+  tenantId: string,
+  clientId: string,
+): Promise<void> {
+  try {
+    const supabase = getSupabase();
+    if (!supabase || !tenantId || !clientId) return;
+    const profile = readCustomerProfile();
+    if (!profile?.name) return;
+    await supabase.from("customers").upsert(
+      {
+        tenant_id: tenantId,
+        client_id: clientId,
+        nickname: profile.name,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "tenant_id,client_id" },
+    );
+  } catch {
+    // ignore
+  }
 }

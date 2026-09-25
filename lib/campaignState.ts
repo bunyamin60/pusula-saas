@@ -54,6 +54,7 @@ export interface CampaignSettings {
   wheelPrizes: WheelPrize[];
   talkCategories: TalkCategory[];
   enabledGames: EnabledGames;
+  venueMode: "masa" | "kasa";
   revision?: string;
 }
 
@@ -78,6 +79,7 @@ export interface TenantSettingsRow {
   hero_subtitle?: string | null;
   enabled_games?: unknown;
   active_games?: unknown;
+  venue_mode?: string | null;
 }
 
 const EXTRA_PRODUCT_ID = "__extra";
@@ -384,6 +386,7 @@ export function defaultCampaign(tenantId: string = DEFAULT_TENANT_ID): CampaignS
     wheelPrizes: defaultWheelPrizes(),
     talkCategories: defaultTalkCategories(),
     enabledGames: defaultEnabledGames(),
+    venueMode: "masa",
   };
 }
 
@@ -695,6 +698,10 @@ function parseCampaign(raw: string): CampaignSettings | null {
       wheelPrizes: parsePrizes(parsed.wheelPrizes),
       talkCategories: parseTalkCategories(parsed.talkCategories),
       enabledGames: parseEnabledGames(parsed.enabledGames, defaults.enabledGames),
+      venueMode:
+        parsed.venueMode === "kasa" || parsed.venueMode === "masa"
+          ? parsed.venueMode
+          : defaults.venueMode,
     };
   } catch {
     return null;
@@ -914,6 +921,12 @@ export function campaignFromRow(row: TenantSettingsRow): CampaignSettings {
         extra.enabledGames,
       defaults.enabledGames,
     ),
+    venueMode:
+      row.venue_mode === "kasa" || row.venue_mode === "masa"
+        ? row.venue_mode
+        : extra.venueMode === "kasa" || extra.venueMode === "masa"
+          ? extra.venueMode
+          : defaults.venueMode,
     revision: row.updated_at,
   };
 }
@@ -949,6 +962,7 @@ export function campaignToRow(settings: CampaignSettings): Omit<TenantSettingsRo
     hero_subtitle: settings.heroSubtitle,
     active_games: serializeActiveGames(settings.enabledGames),
     enabled_games: serializeActiveGames(settings.enabledGames),
+    venue_mode: settings.venueMode === "kasa" ? "kasa" : "masa",
     products: [
       ...settings.products.map((product) => {
         const tastingNotes = (product.tastingNotes ?? [])
@@ -982,6 +996,7 @@ export function campaignToRow(settings: CampaignSettings): Omit<TenantSettingsRo
         wheelPrizes: settings.wheelPrizes,
         adminPassword: settings.adminPassword.trim(),
         enabledGames: settings.enabledGames,
+        venueMode: settings.venueMode,
       },
     ],
     updated_at: new Date().toISOString(),
