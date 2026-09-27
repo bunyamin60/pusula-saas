@@ -5,13 +5,16 @@ import { economyClient, readTenantId } from "@/lib/economyServer";
 export async function POST(request: Request) {
   try {
     const device = await resolveDevice(request);
-    const body = (await request.json()) as { tenantId?: string };
+    const body = (await request.json().catch(() => null)) as {
+      tenantId?: string;
+    } | null;
     const tenantId = readTenantId(body, request);
 
-    const { data, error } = await economyClient().rpc("redeem_stamp_reward", {
-      p_tenant_id: tenantId,
-      p_client_id: device.id,
-    });
+    const { error } = await economyClient()
+      .from("play_sessions")
+      .delete()
+      .eq("tenant_id", tenantId)
+      .eq("device_id", device.id);
 
     if (error) {
       return applyDeviceCookie(
@@ -23,8 +26,9 @@ export async function POST(request: Request) {
         device.fresh,
       );
     }
+
     return applyDeviceCookie(
-      NextResponse.json(data ?? { ok: false, reason: "offline" }),
+      NextResponse.json({ ok: true }),
       device.token,
       device.fresh,
     );

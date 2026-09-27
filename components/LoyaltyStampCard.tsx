@@ -146,15 +146,9 @@ export function LoyaltyStampCard({
       <p className="mt-1 text-xs font-medium text-[var(--text-body)]">
         {copy.lead.replaceAll("{brand}", brand)}
       </p>
-
-      {status ? (
-        <p className="mt-2 font-sans text-[11px] font-bold text-[var(--text-body)]">
-          {copy.xpLine
-            .replace("{earned}", String(status.xp_day_earned))
-            .replace("{cap}", String(status.daily_cap))
-            .replace("{total}", String(status.xp_total))}
-        </p>
-      ) : null}
+      <p className="mt-1 text-xs font-medium text-[var(--text-body)]">
+        {copy.weekPrize}
+      </p>
 
       <ol className="mt-4 flex items-end justify-between gap-1.5">
         {Array.from({ length: STAMP_GOAL }, (_, index) => {

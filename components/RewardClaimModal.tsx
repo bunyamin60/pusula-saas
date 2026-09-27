@@ -1,20 +1,21 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion, useDragControls } from "framer-motion";
+import { AnimatePresence, motion, useDragControls, useMotionValue } from "framer-motion";
 import { X } from "lucide-react";
 import { OptionIcon } from "@/components/OptionIcon";
 import { usePlayReward } from "@/components/PlayRewardProvider";
 import { tenantConfig, type CompassOption, type Recipe } from "@/config/tenant.config";
 import {
+  getActiveTenantId,
   optionDescOf,
   optionTagOf,
   pusulaFunnelEnabled,
   questionTitleOf,
 } from "@/lib/campaignState";
 import { matchRecipe } from "@/lib/matchRecipe";
-import { getPlayRewardRecipe, makePlayRewardCode } from "@/lib/playReward";
+import { getClientPlayReward, getPlayRewardRecipe, syncPlayHeartbeat } from "@/lib/playReward";
 import { useCampaign } from "@/lib/useCampaign";
 
 type ClaimStep = "congrats" | "compass" | "result";
@@ -35,25 +36,34 @@ export function RewardClaimModal() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [recipe, setRecipe] = useState<Recipe | null>(sealedRecipe);
   const [code, setCode] = useState(claimedCode);
+  const [isCodeRevealed, setIsCodeRevealed] = useState(false);
+  const [issuing, setIssuing] = useState(false);
   const [mounted, setMounted] = useState(false);
   const dragControls = useDragControls();
+  const sheetY = useMotionValue(0);
+  const sheetReady = useRef(false);
 
   useEffect(() => setMounted(true), []);
 
+  useEffect(() => {
+    if (claimOpen) sheetY.set(0);
+  }, [claimOpen, sheetY]);
+
   useLayoutEffect(() => {
-    if (!claimOpen) return;
-    if (claimedCode) {
-      setStep("result");
-      setCode(claimedCode);
-      setRecipe(getPlayRewardRecipe(recipeId));
+    if (!claimOpen) {
+      sheetReady.current = false;
+      setIsCodeRevealed(false);
       return;
     }
+    if (sheetReady.current) return;
+    sheetReady.current = true;
+    setIsCodeRevealed(false);
     setStep("congrats");
     setIndex(0);
     setAnswers({});
     setRecipe(null);
-    setCode(null);
-  }, [claimOpen, claimedCode, recipeId, funnelOn, sealClaim]);
+    setCode(claimedCode || getClientPlayReward().claimedCode);
+  }, [claimOpen, claimedCode, recipeId]);
 
   useEffect(() => {
     if (!claimOpen) return;
@@ -74,11 +84,20 @@ export function RewardClaimModal() {
     return recipe ?? sealedRecipe;
   }, [recipe, sealedRecipe, step]);
 
-  function showCashierCode() {
-    const nextCode = claimedCode || makePlayRewardCode();
+  async function showCashierCode() {
+    if (issuing) return;
+    let nextCode = claimedCode || getClientPlayReward().claimedCode;
+    if (!nextCode) {
+      setIssuing(true);
+      const synced = await syncPlayHeartbeat(getActiveTenantId(), false);
+      nextCode = synced?.claimedCode || getClientPlayReward().claimedCode;
+      setIssuing(false);
+    }
+    if (!nextCode) return;
     sealClaim(nextCode, "campaign");
     setRecipe(null);
     setCode(nextCode);
+    setIsCodeRevealed(true);
     setStep("result");
   }
 
@@ -99,10 +118,12 @@ export function RewardClaimModal() {
       return;
     }
     const matched = matchRecipe(nextAnswers, campaign);
-    const nextCode = claimedCode || makePlayRewardCode();
-    sealClaim(nextCode, matched.id);
+    sealClaim(claimedCode ?? "", matched.id);
     setRecipe(matched);
-    setCode(nextCode);
+    const readyCode = claimedCode || getClientPlayReward().claimedCode;
+    if (!readyCode) return;
+    setCode(readyCode);
+    setIsCodeRevealed(true);
     setStep("result");
   }
 
@@ -134,15 +155,19 @@ export function RewardClaimModal() {
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", stiffness: 340, damping: 32 }}
+            style={{ y: sheetY }}
             drag="y"
             dragControls={dragControls}
             dragListener={false}
-            dragConstraints={{ top: 0, bottom: 0 }}
-            dragElastic={{ top: 0.04, bottom: 0.72 }}
+            dragConstraints={{ top: 0 }}
+            dragElastic={0.12}
+            dragMomentum={false}
             onDragEnd={(_, info) => {
-              if (info.offset.y > 110 || info.velocity.y > 650) {
+              if (info.offset.y > 90 || info.velocity.y > 700) {
                 closeClaim();
+                return;
               }
+              sheetY.set(0);
             }}
             className="relative z-10 flex max-h-[92dvh] w-full max-w-md flex-col overflow-hidden rounded-t-3xl border border-ink/15 bg-background shadow-lift"
           >
@@ -184,8 +209,9 @@ export function RewardClaimModal() {
                 </p>
                 <button
                   type="button"
-                  onClick={showCashierCode}
-                  className="btn-primary mt-6 w-full"
+                  onClick={() => void showCashierCode()}
+                  disabled={issuing}
+                  className="btn-primary mt-6 w-full disabled:opacity-50"
                 >
                   {copy.skipFunnelCta}
                 </button>
@@ -207,7 +233,7 @@ export function RewardClaimModal() {
                   type="button"
                   onClick={() => {
                     if (index === 0) {
-                      setStep(code ? "result" : "congrats");
+                      setStep(isCodeRevealed ? "result" : "congrats");
                       return;
                     }
                     setIndex(index - 1);
@@ -265,30 +291,18 @@ export function RewardClaimModal() {
               </div>
             ) : null}
 
-            {step === "result" && code ? (
+            {step === "result" && code && isCodeRevealed ? (
               <div className="pb-2 pt-1 text-center">
-                <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
-                  {result ? copy.resultEyebrow : copy.directEyebrow}
-                </p>
                 <h2
                   id="play-reward-title"
-                  className="mt-2 font-sans text-2xl font-extrabold leading-tight tracking-tight text-ink"
+                  className="font-sans text-2xl font-extrabold leading-tight tracking-tight text-ink"
                 >
-                  {resultTitle}
+                  {result ? resultTitle : copy.congratsTitle}
                 </h2>
-                {resultNote ? (
+                {result && resultNote ? (
                   <p className="mt-2 font-sans text-sm font-medium text-muted">{resultNote}</p>
                 ) : null}
-                {funnelOn && result && !redeemedAt ? (
-                  <button
-                    type="button"
-                    onClick={openCompass}
-                    className="btn-secondary mt-4 w-full"
-                  >
-                    {copy.resultCompassAgainCta}
-                  </button>
-                ) : null}
-                <div className="relative mt-5 overflow-hidden rounded-3xl border border-ink/15 bg-primary px-4 py-5">
+                <div className="relative mt-4 overflow-hidden rounded-3xl border border-ink/15 bg-primary px-4 py-5">
                   <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.16em] text-on-primary">
                     {copy.couponLabel}
                   </p>
@@ -301,31 +315,19 @@ export function RewardClaimModal() {
                     </span>
                   ) : null}
                 </div>
-                <p className="mt-4 font-sans text-sm font-medium leading-relaxed text-muted">
+                <p className="mt-3 font-sans text-sm font-medium leading-snug text-muted">
                   {redeemedAt ? copy.couponUsedBody : copy.couponHint}
                 </p>
-                {funnelOn && !result && !redeemedAt ? (
-                  <div className="mt-5">
-                    <p className="mb-2.5 font-sans text-sm font-semibold text-[var(--text-body)]">
-                      {copy.resultCompassLead}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={openCompass}
-                      className="btn-primary w-full"
-                    >
-                      {copy.resultCompassCta}
-                    </button>
-                  </div>
+                {funnelOn && !redeemedAt ? (
+                  <button
+                    type="button"
+                    onClick={openCompass}
+                    className="btn-secondary mt-4 w-full"
+                  >
+                    {result ? copy.resultCompassAgainCta : copy.resultCompassCta}
+                  </button>
                 ) : null}
                 <GoogleOptionalLink />
-                <button
-                  type="button"
-                  onClick={closeClaim}
-                  className="btn-secondary mt-5 w-full"
-                >
-                  {copy.close}
-                </button>
               </div>
             ) : null}
             </div>

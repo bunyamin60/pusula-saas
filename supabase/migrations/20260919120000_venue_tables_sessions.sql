@@ -92,6 +92,7 @@ language plpgsql
 security definer
 set search_path = public, pg_temp
 as $$
+#variable_conflict use_column
 declare
   next_code text := lower(trim(p_code));
   next_label text := nullif(trim(coalesce(p_label, '')), '');

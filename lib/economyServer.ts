@@ -1,10 +1,8 @@
-import { getSupabase } from "@/lib/supabase";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { resolveTenantId } from "@/lib/tenant";
 
 export function economyClient() {
-  const supabase = getSupabase();
-  if (!supabase) throw new Error("missing-supabase-env");
-  return supabase;
+  return getSupabaseAdmin();
 }
 
 export function readTenantId(body: { tenantId?: unknown } | null, request: Request): string {
@@ -12,12 +10,6 @@ export function readTenantId(body: { tenantId?: unknown } | null, request: Reque
     body && typeof body.tenantId === "string" ? body.tenantId : null;
   const url = new URL(request.url);
   return resolveTenantId(fromBody ?? url.searchParams.get("tenantId"));
-}
-
-export function readClientId(body: { clientId?: unknown } | null): string | null {
-  if (!body || typeof body.clientId !== "string") return null;
-  const id = body.clientId.trim();
-  return id.length >= 8 && id.length <= 80 ? id : null;
 }
 
 export async function verifyAdminPassword(
@@ -37,4 +29,25 @@ export async function verifyAdminPassword(
       : "";
   if (!expected) return false;
   return expected === pin;
+}
+
+export async function activeTableLabel(
+  tenantId: string,
+  deviceId: string,
+): Promise<string | null> {
+  const { data } = await economyClient()
+    .from("table_sessions")
+    .select("table_code")
+    .eq("tenant_id", tenantId)
+    .eq("client_id", deviceId)
+    .eq("status", "active")
+    .order("last_seen_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const code =
+    data && typeof (data as { table_code?: string }).table_code === "string"
+      ? (data as { table_code: string }).table_code.trim()
+      : "";
+  if (!code) return null;
+  return /^\d+$/.test(code) ? `Masa #${code}` : `Masa ${code}`;
 }

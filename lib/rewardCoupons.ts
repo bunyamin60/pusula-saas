@@ -128,121 +128,26 @@ export async function registerRewardCoupon(input: {
 export async function redeemRewardCoupon(
   tenantId: string,
   rawCode: string,
+  adminPassword = "",
 ): Promise<RedeemCouponResult> {
   const code = normalizeCode(rawCode);
   if (!tenantId || !code) return { ok: false, reason: "offline" };
-
   try {
-    const supabase = getSupabase();
-    if (!supabase) return { ok: false, reason: "offline" };
-
-    const { data, error } = await supabase
-      .from("reward_coupons")
-      .select("coupon_code, table_id, reward_text, status, redeemed_at")
-      .eq("tenant_id", tenantId)
-      .eq("coupon_code", code)
-      .maybeSingle();
-
-    if (error) throw error;
-
-    const row = data as CouponRow | null;
-    if (row && isRedeemed(row.status)) {
-      return {
-        ok: false,
-        reason: "used",
-        redeemedAt: row.redeemed_at ?? null,
-      };
-    }
-
-    if (row) {
-      const redeemedAt = new Date().toISOString();
-      const updated = await supabase
-        .from("reward_coupons")
-        .update({
-          status: "REDEEMED",
-          redeemed_at: redeemedAt,
-        })
-        .eq("tenant_id", tenantId)
-        .eq("coupon_code", code)
-        .select("coupon_code, table_id, reward_text, status, redeemed_at")
-        .maybeSingle();
-
-      if (updated.error) throw updated.error;
-      void redeemClaimedReward(tenantId, code);
-      return {
-        ok: true,
-        coupon: mapCoupon(
-          (updated.data as CouponRow | null) ?? {
-            ...row,
-            status: "REDEEMED",
-            redeemed_at: redeemedAt,
-          },
-        ),
-      };
-    }
-
-    const legacy = await redeemClaimedReward(tenantId, code);
-    if (legacy.ok) {
-      const redeemedAt = new Date().toISOString();
-      const synced = await upsertRewardCouponRow({
-        tenantId,
-        code: legacy.reward.code || code,
-        tableId: legacy.reward.tableId,
-        rewardText: legacy.reward.rewardText,
-        status: "REDEEMED",
-        redeemedAt,
-      });
-      return {
-        ok: true,
-        coupon: synced
-          ? mapCoupon(synced)
-          : {
-              code: legacy.reward.code || code,
-              tableId: legacy.reward.tableId,
-              rewardText: legacy.reward.rewardText,
-              redeemedAt,
-            },
-      };
-    }
-    if (legacy.reason === "used") {
-      const redeemedAt = new Date().toISOString();
-      await upsertRewardCouponRow({
-        tenantId,
-        code,
-        status: "REDEEMED",
-        redeemedAt,
-      });
-      return { ok: false, reason: "used", redeemedAt };
-    }
-    return { ok: false, reason: "missing" };
-  } catch {
-    // Fall through to the previous coupon table.
-  }
-
-  const legacy = await redeemClaimedReward(tenantId, code);
-  if (legacy.ok) {
-    const redeemedAt = new Date().toISOString();
-    const synced = await upsertRewardCouponRow({
-      tenantId,
-      code: legacy.reward.code || code,
-      tableId: legacy.reward.tableId,
-      rewardText: legacy.reward.rewardText,
-      status: "REDEEMED",
-      redeemedAt,
+    const res = await fetch("/api/economy/coupons/redeem", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ tenantId, code, adminPassword }),
     });
-    return {
-      ok: true,
-      coupon: synced
-        ? mapCoupon(synced)
-        : {
-            code: legacy.reward.code || code,
-            tableId: legacy.reward.tableId,
-            rewardText: legacy.reward.rewardText,
-            redeemedAt,
-          },
-    };
+    const data = (await res.json()) as RedeemCouponResult & { reason?: string };
+    if (!data || typeof data.ok !== "boolean") return { ok: false, reason: "offline" };
+    if (!data.ok && data.reason !== "used" && data.reason !== "missing") {
+      return { ok: false, reason: "offline" };
+    }
+    return data;
+  } catch {
+    return { ok: false, reason: "offline" };
   }
-  return { ok: false, reason: legacy.reason };
 }
 
 export async function fetchCouponRedemption(

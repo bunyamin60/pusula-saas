@@ -6,6 +6,7 @@ import { usePlayReward } from "@/components/PlayRewardProvider";
 import { tenantConfig } from "@/config/tenant.config";
 import { getActiveTenantId } from "@/lib/campaignState";
 import { wipeGuestLocalData } from "@/lib/guestWipe";
+import { markPlayRewardReset } from "@/lib/playReward";
 import { DEFAULT_TENANT_ID } from "@/lib/tenant";
 
 export function DeviceTestReset() {
@@ -22,14 +23,23 @@ export function DeviceTestReset() {
     return () => window.clearTimeout(timer);
   }, [isConfirming]);
 
-  function resetDevice() {
+  async function resetDevice() {
+    setIsConfirming(false);
     try {
+      markPlayRewardReset();
       wipeGuestLocalData(tenantId);
+      await fetch("/api/economy/play/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ tenantId }),
+      });
     } catch {
       // Test helper must never throw into the guest flow.
     }
+    markPlayRewardReset();
     setToast(copy.resetDeviceDone);
-    window.setTimeout(() => window.location.reload(), 900);
+    window.setTimeout(() => window.location.reload(), 400);
   }
 
   return (

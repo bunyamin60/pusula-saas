@@ -168,12 +168,9 @@ function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
       <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-5 pb-2">
         <RewardProgressBar compact />
 
-        <div className="mt-3">
-          <DailyQuestionFeed tenantId={tenantId} clientId={player.clientId} />
-        </div>
-
         {tab === "games" ? (
           <div className="mt-3 space-y-3 pb-3">
+            <DailyQuestionFeed tenantId={tenantId} clientId={player.clientId} />
             <div className="grid grid-cols-2 gap-3">
               {visible.map((game) => {
                 const { title, badge, caption } = arcadeGameCopy(game.id);

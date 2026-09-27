@@ -1153,6 +1153,7 @@ export const tenantConfig = {
         title: "{brand} Damga Kartı",
         badge: "{count} / {max} Damga",
         lead: "Gerçek alışverişini personele onaylat, 6 damgada hediye ürün kazan!",
+        weekPrize: "Haftanın oyun birincisi, yeni hafta açılınca 1 damga kazanır.",
         gift: "Hediye",
         demo: "Ziyareti Onayla (Demo)",
         rewarded: "Hediye damgan hazır.",
@@ -1168,7 +1169,6 @@ export const tenantConfig = {
         cooldownTimer: "Sonraki damga: {time}",
         needMore: "Ödül için 6 damga gerekli.",
         offline: "Bağlantı yok, tekrar dene.",
-        xpLine: "Bugün {earned}/{cap} XP · Toplam {total} XP",
         xpCapped:
           "Bugünkü XP sınırına ulaştın, sadece eğlencesine devam edebilirsin!",
         proofKicker: "Hediye Onay",
@@ -1197,6 +1197,8 @@ export const tenantConfig = {
         authNeeded: "Yanıt göndermek için hızlı giriş yap.",
         authTitle: "Yanıtlamak için hızlı giriş",
         authSubmit: "Giriş Yap / Devam Et",
+        close: "Kapat",
+        answer: "Cevapla",
       },
       dock: {
         games: "Oyunlar",
@@ -1782,6 +1784,7 @@ export const tenantConfig = {
       readyCta: "İkramın hazır",
       readyCtaShort: "İkramın hazır",
       readyOpen: "Al",
+      readyNotice: "İkramını alabilirsin",
       congratsTitle: "İkramın Masanda!",
       congratsBody:
         "{minutes} dakikalık süreyi tamamladın. İkramını nasıl almak istersin?",
@@ -1845,6 +1848,7 @@ export const tenantConfig = {
         playing: "{game} · {minutes} dk",
         seated: "Masada · {minutes} dk",
         refresh: "Yenile",
+        offline: "Masalar şu an yüklenemedi. Yenile.",
       },
       kasa: {
         lead: "Kodu yaz, kasadan ikramı onayla.",
@@ -1852,6 +1856,7 @@ export const tenantConfig = {
         historyEmpty: "Bugün henüz kupon onaylanmadı.",
         historyTable: "{table}",
         stampsTitle: "Bekleyen damga istekleri",
+        stampsLead: "Müşteri damga isteyince onay burada.",
         stampsEmpty: "Bekleyen damga isteği yok.",
         stampsApprove: "Onayla",
         stampsCode: "Kod: {code}",
@@ -1871,11 +1876,6 @@ export const tenantConfig = {
         applyCta: "Uygula",
         activeTheme: "Aktif Tema",
         activeBadge: "✓ Aktif",
-        modeTitle: "Damga akışı (Mekan türü)",
-        modeMasa: "Masa",
-        modeKasa: "Kasa",
-        modeHint:
-          "Masa: müşteri masa numarası girer. Kasa: doğrudan 3 haneli kod üretilir.",
         passwordTitle: "Yönetici Şifresini Değiştir",
         passwordCurrent: "Mevcut PIN",
         passwordNew: "Yeni PIN",

@@ -17,6 +17,7 @@ import {
   isPlaySessionActive,
   markPlayRewardRedeemed,
   subscribePlaySession,
+  syncPlayHeartbeat,
 } from "@/lib/playReward";
 import { fetchCouponRedemption } from "@/lib/rewardCoupons";
 
@@ -57,6 +58,11 @@ export function PlayRewardProvider({
     completePlayRewardNow();
     setClaimOpen(true);
   }, []);
+
+  useEffect(() => {
+    if (!tenantId || !timer.isUnlocked || timer.claimedCode) return;
+    void syncPlayHeartbeat(tenantId, false);
+  }, [tenantId, timer.claimedCode, timer.isUnlocked]);
 
   // When kasa redeems the code, hide it on this device without a reload.
   useEffect(() => {

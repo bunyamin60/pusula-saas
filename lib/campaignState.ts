@@ -1142,5 +1142,5 @@ export function isValidDuration(minutes: number): boolean {
 
 export function clampRewardDuration(minutes: number, fallback = 20): number {
   if (!Number.isFinite(minutes)) return fallback;
-  return Math.min(45, Math.max(10, Math.round(minutes)));
+  return Math.min(45, Math.max(1, Math.round(minutes)));
 }

@@ -5,12 +5,9 @@ import {
 } from "@/config/tenant.config";
 import {
   clampRewardDuration,
-  getActiveTenantId,
   getCampaignSettings,
 } from "@/lib/campaignState";
 import { getRecipeById } from "@/lib/matchRecipe";
-import { registerRewardCoupon } from "@/lib/rewardCoupons";
-import { getActiveTableLabel } from "@/lib/tableSession";
 
 const EMPTY: PlayRewardProgress = {
   elapsedSeconds: 0,
@@ -24,7 +21,16 @@ const EMPTY: PlayRewardProgress = {
 type Listener = () => void;
 
 const listeners = new Set<Listener>();
+const RESET_FLAG = "arada_reward_reset";
 let memory: PlayRewardProgress | null = null;
+
+function rewardResetPending(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof sessionStorage !== "undefined" &&
+    sessionStorage.getItem(RESET_FLAG) === "1"
+  );
+}
 
 function canUseStorage(): boolean {
   return typeof window !== "undefined" && typeof localStorage !== "undefined";
@@ -122,6 +128,16 @@ export function clearPlayRewardProgress(): void {
   emit();
 }
 
+/** Drop the ikram bar back to zero and ignore a stale server snapshot until reload. */
+export function markPlayRewardReset(): void {
+  clearPlayRewardProgress();
+  try {
+    sessionStorage.setItem(RESET_FLAG, "1");
+  } catch {
+    // Session storage can be blocked; the server row is still cleared.
+  }
+}
+
 let playSessions = 0;
 const playSessionListeners = new Set<Listener>();
 
@@ -203,6 +219,10 @@ function clampProgress(raw: Partial<PlayRewardProgress> | null): PlayRewardProgr
 
 function readStored(): PlayRewardProgress {
   if (!canUseStorage()) return { ...EMPTY };
+  if (rewardResetPending()) {
+    localStorage.removeItem(playRewardStorageKey());
+    return { ...EMPTY };
+  }
   try {
     const raw = localStorage.getItem(playRewardStorageKey());
     if (!raw) return { ...EMPTY };
@@ -262,33 +282,102 @@ export function matchPlayRewardRecipe(answers: Record<string, string>): Recipe {
   return best;
 }
 
-export function sealPlayRewardClaim(code: string, recipeId: string): PlayRewardProgress {
+export function sealPlayRewardClaim(_code: string, recipeId: string): PlayRewardProgress {
   const current = getClientPlayReward();
-  const target = playRewardTargetSeconds();
-  const next = persist({
+  return persist({
     ...current,
-    elapsedSeconds: Math.max(current.elapsedSeconds, target),
-    isUnlocked: true,
-    claimedCode: current.claimedCode || code,
-    recipeId:
-      current.recipeId && current.recipeId !== "campaign"
-        ? current.recipeId
-        : recipeId,
+    claimedCode: current.claimedCode,
+    recipeId: recipeId.trim() || current.recipeId,
     lastPing: Date.now(),
-    redeemedAt: current.redeemedAt ?? null,
   });
-  const sealed = next.claimedCode || code;
-  const recipe = getPlayRewardRecipe(next.recipeId);
-  const rewardText =
-    recipe?.name?.trim() || getCampaignSettings().hook.trim() || "";
-  const tenantId = getActiveTenantId();
-  void registerRewardCoupon({
-    tenantId,
-    code: sealed,
-    tableId: getActiveTableLabel(tenantId),
-    rewardText,
-  });
+}
+
+/** Server elapsed and coupon merge into the local cache without rewinding the clock. */
+export function applyServerPlayProgress(input: {
+  elapsedSeconds: number;
+  targetSeconds: number;
+  claimedCode: string | null;
+}): PlayRewardProgress {
+  const clientTarget = playRewardTargetSeconds();
+  const current = getClientPlayReward();
+  const serverElapsed = Math.max(0, Math.floor(input.elapsedSeconds) || 0);
+  const claimed = input.claimedCode?.trim() || null;
+  if (rewardResetPending() && (claimed || serverElapsed > 0)) {
+    return current;
+  }
+  if (rewardResetPending()) {
+    try {
+      sessionStorage.removeItem(RESET_FLAG);
+    } catch {
+      // Ignore a blocked session storage clear.
+    }
+  }
+  const elapsed = claimed
+    ? clientTarget
+    : Math.min(clientTarget, Math.max(current.elapsedSeconds, serverElapsed));
+  const next: PlayRewardProgress = {
+    elapsedSeconds: elapsed,
+    isUnlocked: Boolean(claimed) || elapsed >= Math.max(1, clientTarget - 1),
+    claimedCode: claimed,
+    lastPing: current.lastPing,
+    recipeId: memory?.recipeId ?? readStored().recipeId,
+    redeemedAt: memory?.redeemedAt ?? readStored().redeemedAt,
+  };
+  memory = next;
+  if (canUseStorage()) {
+    localStorage.setItem(playRewardStorageKey(), JSON.stringify(next));
+  }
+  emit();
   return next;
+}
+
+const revealListeners = new Set<() => void>();
+
+export function subscribePlayCouponReveal(listener: () => void): () => void {
+  revealListeners.add(listener);
+  return () => revealListeners.delete(listener);
+}
+
+function revealPlayCoupon(): void {
+  revealListeners.forEach((listener) => listener());
+}
+
+async function postPlayHeartbeat(
+  tenantId: string,
+  playing: boolean,
+): Promise<PlayRewardProgress | null> {
+  try {
+    const previousCode = getClientPlayReward().claimedCode;
+    const res = await fetch("/api/economy/play/heartbeat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ tenantId, playing }),
+    });
+    const data = (await res.json()) as {
+      ok?: boolean;
+      elapsed_seconds?: number;
+      target_seconds?: number;
+      coupon_code?: string | null;
+    };
+    if (!res.ok || !data.ok) return null;
+    const next = applyServerPlayProgress({
+      elapsedSeconds: Number(data.elapsed_seconds) || 0,
+      targetSeconds: Number(data.target_seconds) || playRewardTargetSeconds(),
+      claimedCode: typeof data.coupon_code === "string" ? data.coupon_code : null,
+    });
+    if (next.claimedCode && next.claimedCode !== previousCode) revealPlayCoupon();
+    return next;
+  } catch {
+    return null;
+  }
+}
+
+export async function syncPlayHeartbeat(
+  tenantId: string,
+  playing: boolean,
+): Promise<PlayRewardProgress | null> {
+  return postPlayHeartbeat(tenantId, playing);
 }
 
 export function markPlayRewardRedeemed(redeemedAt?: string | null): PlayRewardProgress {
@@ -335,6 +424,6 @@ export function applyPlayRewardTick(
     ...current,
     elapsedSeconds: elapsed,
     isUnlocked: elapsed >= targetSeconds,
-    lastPing: now,
+    lastPing: current.lastPing + credit * 1000,
   });
 }

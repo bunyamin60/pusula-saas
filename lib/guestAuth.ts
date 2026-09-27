@@ -137,14 +137,10 @@ async function parkClientRow(
 ): Promise<boolean> {
   const supabase = getSupabase();
   if (!supabase) return false;
-  const { error } = await supabase
-    .from("customers")
-    .update({
-      client_id: `parked_${clientId}_${Date.now()}`,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("tenant_id", tenantId)
-    .eq("client_id", clientId);
+  const { error } = await supabase.rpc("park_customer_client", {
+    p_tenant_id: tenantId,
+    p_client_id: clientId,
+  });
   return !error;
 }
 
@@ -170,33 +166,26 @@ async function loginExisting(
       const parked = await parkClientRow(input.tenantId, input.clientId);
       if (!parked) return { ok: false, reason: "offline" };
     }
+    const { error } = await supabase.rpc("rebind_customer_client", {
+      p_tenant_id: input.tenantId,
+      p_from_client_id: row.client_id,
+      p_to_client_id: input.clientId,
+      p_nickname: nickname,
+      p_pin_code: pin,
+      p_avatar_url: avatarUrl,
+    });
+    if (error) return { ok: false, reason: "offline" };
+    return sealSession(input.tenantId, input.clientId, nickname, stamps, avatarUrl);
   }
 
-  const patch = {
-    client_id: input.clientId,
-    nickname,
-    pin_code: pin,
-    avatar_url: avatarUrl,
-    stamp_count: stamps.count,
-    last_coupon_code: stamps.lastCode,
-    updated_at: new Date().toISOString(),
-  };
-
-  const { error } = await supabase
-    .from("customers")
-    .update(patch)
-    .eq("tenant_id", input.tenantId)
-    .eq("client_id", row.client_id);
-
-  if (error) {
-    const { error: byNickError } = await supabase
-      .from("customers")
-      .update(patch)
-      .eq("tenant_id", input.tenantId)
-      .eq("nickname", row.nickname);
-    if (byNickError) return { ok: false, reason: "offline" };
-  }
-
+  const { error } = await supabase.rpc("save_customer_profile", {
+    p_tenant_id: input.tenantId,
+    p_client_id: input.clientId,
+    p_nickname: nickname,
+    p_pin_code: pin,
+    p_avatar_url: avatarUrl,
+  });
+  if (error) return { ok: false, reason: "offline" };
   return sealSession(input.tenantId, input.clientId, nickname, stamps, avatarUrl);
 }
 
@@ -231,18 +220,13 @@ export async function signInWithNicknamePin(
 
     if (byClient.row) {
       const stamps = mergeStamps(input.tenantId, input.clientId, byClient.row);
-      const { error } = await supabase
-        .from("customers")
-        .update({
-          nickname,
-          pin_code: pin,
-          avatar_url: avatarUrl,
-          stamp_count: stamps.count,
-          last_coupon_code: stamps.lastCode,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("tenant_id", input.tenantId)
-        .eq("client_id", input.clientId);
+      const { error } = await supabase.rpc("save_customer_profile", {
+        p_tenant_id: input.tenantId,
+        p_client_id: input.clientId,
+        p_nickname: nickname,
+        p_pin_code: pin,
+        p_avatar_url: avatarUrl,
+      });
 
       if (error) {
         if (error.code === "23505") {
@@ -259,15 +243,12 @@ export async function signInWithNicknamePin(
     }
 
     const stamps = writeStampCard(input.tenantId, input.clientId, local);
-    const { error: insertError } = await supabase.from("customers").insert({
-      tenant_id: input.tenantId,
-      client_id: input.clientId,
-      nickname,
-      pin_code: pin,
-      avatar_url: avatarUrl,
-      stamp_count: stamps.count,
-      last_coupon_code: stamps.lastCode,
-      updated_at: new Date().toISOString(),
+    const { error: insertError } = await supabase.rpc("save_customer_profile", {
+      p_tenant_id: input.tenantId,
+      p_client_id: input.clientId,
+      p_nickname: nickname,
+      p_pin_code: pin,
+      p_avatar_url: avatarUrl,
     });
 
     if (insertError) {
@@ -279,18 +260,13 @@ export async function signInWithNicknamePin(
         const device = await findByClientId(input.tenantId, input.clientId);
         if (device.row) {
           const merged = mergeStamps(input.tenantId, input.clientId, device.row);
-          const { error: patchError } = await supabase
-            .from("customers")
-            .update({
-              nickname,
-              pin_code: pin,
-              avatar_url: avatarUrl,
-              stamp_count: merged.count,
-              last_coupon_code: merged.lastCode,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("tenant_id", input.tenantId)
-            .eq("client_id", input.clientId);
+          const { error: patchError } = await supabase.rpc("save_customer_profile", {
+            p_tenant_id: input.tenantId,
+            p_client_id: input.clientId,
+            p_nickname: nickname,
+            p_pin_code: pin,
+            p_avatar_url: avatarUrl,
+          });
           if (!patchError) {
             return sealSession(
               input.tenantId,

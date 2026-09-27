@@ -1,39 +1,41 @@
+import { NextResponse } from "next/server";
+import { applyDeviceCookie, resolveDevice } from "@/lib/deviceCookie";
 import {
+  activeTableLabel,
   economyClient,
-  readClientId,
   readTenantId,
 } from "@/lib/economyServer";
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as {
-      tenantId?: string;
-      clientId?: string;
-      tableLabel?: string | null;
-    };
+    const device = await resolveDevice(request);
+    const body = (await request.json()) as { tenantId?: string };
     const tenantId = readTenantId(body, request);
-    const clientId = readClientId(body);
-    if (!clientId) {
-      return Response.json({ ok: false, reason: "invalid" }, { status: 400 });
-    }
-    const tableLabel =
-      typeof body.tableLabel === "string" ? body.tableLabel.trim().slice(0, 32) : null;
+    const tableLabel = await activeTableLabel(tenantId, device.id);
 
     const { data, error } = await economyClient().rpc("create_stamp_request", {
       p_tenant_id: tenantId,
-      p_client_id: clientId,
+      p_client_id: device.id,
       p_table_label: tableLabel,
     });
 
     if (error) {
-      return Response.json(
-        { ok: false, reason: error.message || "offline" },
-        { status: 500 },
+      return applyDeviceCookie(
+        NextResponse.json(
+          { ok: false, reason: error.message || "offline" },
+          { status: 500 },
+        ),
+        device.token,
+        device.fresh,
       );
     }
-    return Response.json(data ?? { ok: false, reason: "offline" });
+    return applyDeviceCookie(
+      NextResponse.json(data ?? { ok: false, reason: "offline" }),
+      device.token,
+      device.fresh,
+    );
   } catch (error) {
-    return Response.json(
+    return NextResponse.json(
       { ok: false, reason: error instanceof Error ? error.message : "failed" },
       { status: 500 },
     );

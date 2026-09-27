@@ -764,34 +764,27 @@ export function BlockBlastGame({
       }`}
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="grid shrink-0 grid-cols-2 gap-2">
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] p-2 shadow-sm">
-            <p className="font-sans text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-body)]">
-              {copy.score}
-            </p>
-            <p className="font-sans text-xl font-black tabular-nums tracking-tight text-[var(--btn-primary)]">
-              {session.score}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] p-2 shadow-sm">
-            <p className="flex items-center gap-1 font-sans text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-body)]">
-              <Trophy className="size-3 text-[var(--btn-primary)]" aria-hidden />
-              {copy.best}
-            </p>
-            <p className="font-sans text-xl font-black tabular-nums tracking-tight text-[var(--text-headline)]">
-              {high}
-            </p>
-          </div>
+        <div className="grid shrink-0 grid-cols-3 items-center px-1">
+          <p className="flex items-center gap-1 font-sans text-sm font-extrabold tabular-nums text-[var(--text-headline)]">
+            <Trophy className="size-3.5 shrink-0 text-[var(--btn-primary)]" aria-hidden />
+            <span className="sr-only">{copy.best}</span>
+            {high}
+          </p>
+          <p className="text-center font-sans text-3xl font-black tabular-nums leading-none tracking-tight text-[var(--text-headline)]">
+            <span className="sr-only">{copy.score}</span>
+            {session.score}
+          </p>
+          <span aria-hidden />
         </div>
 
-        <div className="mt-2 shrink-0 rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] p-2">
-          <p className="flex items-center gap-1.5 font-sans text-[10px] font-bold leading-snug text-[var(--text-headline)]">
-            <Target className="size-3.5 shrink-0 text-[var(--btn-primary)]" aria-hidden />
+        <div className="mt-1 shrink-0 px-1">
+          <p className="flex items-center gap-1 font-sans text-[10px] font-bold leading-none text-[var(--text-headline)]">
+            <Target className="size-3 shrink-0 text-[var(--btn-primary)]" aria-hidden />
             <span className="min-w-0 truncate">{copy.goalLabel}</span>
           </p>
-          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--text-headline)_12%,transparent)]">
+          <div className="mt-1 h-1 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--text-headline)_12%,transparent)]">
             <div
-              className="h-1.5 rounded-full bg-[var(--btn-primary)]"
+              className="h-1 rounded-full bg-[var(--btn-primary)]"
               style={{ width: goalFill }}
             />
           </div>
@@ -878,12 +871,12 @@ export function BlockBlastGame({
 
         <div
           ref={trayRef}
-          className="mb-2 grid shrink-0 grid-cols-3 gap-2"
+          className="mb-1 grid shrink-0 grid-cols-3"
         >
           {session.tray.map((piece, slot) => (
             <div
               key={slot}
-              className="flex h-24 items-center justify-center overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] sm:h-28"
+              className="flex h-20 items-center justify-center"
             >
               {piece ? (
                 <button

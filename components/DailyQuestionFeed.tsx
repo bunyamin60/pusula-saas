@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { X } from "lucide-react";
 import { CustomerAuthModal } from "@/components/CustomerAuthModal";
 import { GuestAvatarImage } from "@/components/GuestAvatarImage";
 import { tenantConfig } from "@/config/tenant.config";
@@ -49,6 +51,18 @@ export function DailyQuestionFeed({
   const [profile, setProfile] = useState<CustomerProfile | null>(() =>
     readCustomerProfile(),
   );
+  const [open, setOpen] = useState(false);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const dragStart = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [open]);
 
   useEffect(() => {
     setLiked(readLikedGossipIds());
@@ -212,13 +226,84 @@ export function DailyQuestionFeed({
     );
   }
 
+  const prompt = question?.prompt ?? copy.noQuestion;
   const visible = answers.filter((item) => !item.isHidden);
   const cooling = waitMs > 0;
   const locked = busy || cooling;
   const showHiddenBanner = ownHidden;
 
   return (
-    <section className="rounded-3xl border border-[var(--border)] bg-[var(--card-surface)] p-4 shadow-sm">
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex min-h-12 w-full items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-3 py-2 text-left shadow-sm transition active:scale-95"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block font-sans text-[10px] font-black uppercase tracking-wide text-[var(--text-body)]">
+            {copy.kicker}
+          </span>
+          <span className="block truncate font-sans text-sm font-extrabold text-[var(--text-headline)]">
+            {prompt}
+          </span>
+        </span>
+        <span className="inline-flex min-h-12 shrink-0 items-center rounded-xl bg-[var(--btn-primary)] px-3 font-sans text-xs font-extrabold text-[var(--btn-text)]">
+          {copy.answer}
+        </span>
+      </button>
+
+      {open
+        ? createPortal(
+        <div className="fixed inset-0 z-[90] flex items-end justify-center">
+          <button
+            type="button"
+            aria-label={copy.close}
+            className="absolute inset-0 bg-[var(--text-headline)]/40"
+            onClick={() => setOpen(false)}
+          />
+          <div
+            ref={sheetRef}
+            className="relative z-[1] max-h-[85dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-[var(--bg-canvas)] px-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+          >
+            <div
+              className="touch-none px-1 pb-1 pt-3"
+              onPointerDown={(event) => {
+                dragStart.current = event.clientY;
+                event.currentTarget.setPointerCapture(event.pointerId);
+              }}
+              onPointerMove={(event) => {
+                if (dragStart.current == null || !sheetRef.current) return;
+                const dy = Math.max(0, event.clientY - dragStart.current);
+                sheetRef.current.style.transform = `translateY(${dy}px)`;
+              }}
+              onPointerUp={(event) => {
+                if (dragStart.current == null || !sheetRef.current) return;
+                const dy = event.clientY - dragStart.current;
+                dragStart.current = null;
+                if (dy > 80) {
+                  setOpen(false);
+                  return;
+                }
+                sheetRef.current.style.transform = "";
+              }}
+              onPointerCancel={() => {
+                dragStart.current = null;
+                if (sheetRef.current) sheetRef.current.style.transform = "";
+              }}
+            >
+              <div className="mx-auto h-1.5 w-12 rounded-full bg-[var(--accent)]" />
+            </div>
+            <div className="mb-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label={copy.close}
+                className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-full border-2 border-[var(--text-headline)]/20 bg-[var(--bg-canvas)] text-[var(--text-headline)] transition active:scale-95"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <section className="rounded-3xl border border-[var(--border)] bg-[var(--card-surface)] p-4 shadow-sm">
       <p className="text-[11px] font-black uppercase tracking-wider text-[var(--text-body)]">
         {copy.kicker}
       </p>
@@ -368,7 +453,13 @@ export function DailyQuestionFeed({
         title={copy.authTitle}
         submitLabel={copy.authSubmit}
       />
-    </section>
+            </section>
+          </div>
+        </div>,
+        document.body,
+      )
+        : null}
+    </>
   );
 }
 

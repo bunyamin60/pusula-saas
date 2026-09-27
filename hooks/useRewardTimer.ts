@@ -3,6 +3,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { tenantConfig } from "@/config/tenant.config";
 import {
+  getActiveTenantId,
   getCampaignSettings,
   getServerCampaign,
   subscribeToCampaign,
@@ -16,6 +17,7 @@ import {
   playRewardTargetSeconds,
   sealPlayRewardClaim,
   subscribePlayReward,
+  syncPlayHeartbeat,
 } from "@/lib/playReward";
 
 export function useRewardTimer(isGameActive: boolean) {
@@ -41,11 +43,36 @@ export function useRewardTimer(isGameActive: boolean) {
 
     applyPlayRewardTick(Date.now(), running());
 
+    let cancelled = false;
+    // Lobby pings move the server clock without adding time. The first
+    // in-game ping must not count that gap, or the clock opens at 5–8s.
+    let anchor: Promise<unknown> | null = null;
+    const beat = (playing: boolean) => {
+      void (async () => {
+        if (playing) {
+          anchor ??= syncPlayHeartbeat(getActiveTenantId(), false);
+          await anchor;
+        }
+        if (cancelled) return;
+        await syncPlayHeartbeat(getActiveTenantId(), playing);
+      })();
+    };
+
+    let lastRush = 0;
     const tick = () => {
-      applyPlayRewardTick(Date.now(), running());
+      const next = applyPlayRewardTick(Date.now(), running());
+      if (!running() || next.claimedCode) return;
+      const remaining = targetSeconds - next.elapsedSeconds;
+      if (remaining > 15) return;
+      const now = Date.now();
+      if (now - lastRush < 2000) return;
+      lastRush = now;
+      beat(true);
     };
 
     const timer = window.setInterval(tick, tenantConfig.playReward.tickMs);
+    const beatTimer = window.setInterval(() => beat(running()), 10_000);
+    beat(running());
 
     function onVisibility() {
       applyPlayRewardTick(Date.now(), running());
@@ -56,8 +83,10 @@ export function useRewardTimer(isGameActive: boolean) {
     window.addEventListener("pageshow", onVisibility);
 
     return () => {
+      cancelled = true;
       applyPlayRewardTick(Date.now(), false);
       window.clearInterval(timer);
+      window.clearInterval(beatTimer);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", onVisibility);
       window.removeEventListener("pageshow", onVisibility);
@@ -70,7 +99,8 @@ export function useRewardTimer(isGameActive: boolean) {
     targetMinutes,
     remainingSeconds: Math.max(0, targetSeconds - elapsedSeconds),
     progress: Math.min(1, Math.max(0, ratio)),
-    isUnlocked: progress.isUnlocked || elapsedSeconds >= targetSeconds,
+    isUnlocked:
+      progress.isUnlocked || elapsedSeconds >= Math.max(1, targetSeconds - 1),
     isGameActive,
     isPaused: !isGameActive,
     claimedCode: progress.claimedCode,

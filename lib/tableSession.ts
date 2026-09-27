@@ -7,15 +7,6 @@ export type ActiveTable = {
   sessionId?: string;
 };
 
-type JoinRow = {
-  session_id: string;
-  table_id: string;
-  table_code: string;
-  table_label: string;
-  status: string;
-  started_at: string;
-};
-
 function storageKey(tenantId: string): string {
   return `venue_table_${tenantId}`;
 }
@@ -105,32 +96,39 @@ export async function joinVenueTable(input: {
   nickname?: string;
 }): Promise<ActiveTable | null> {
   const code = normalizeTableCode(input.tableCode);
-  if (!code || !input.tenantId || !input.clientId) return null;
+  if (!code || !input.tenantId) return null;
 
   const label = formatTableLabel(code);
   const fallback: ActiveTable = { code, label };
 
   try {
-    const supabase = getSupabase();
-    if (!supabase) {
-      writeCachedTable(input.tenantId, fallback);
-      return fallback;
-    }
-    const { data, error } = await supabase.rpc("join_table_session", {
-      p_tenant_id: input.tenantId,
-      p_table_code: code,
-      p_client_id: input.clientId,
-      p_nickname: input.nickname ?? null,
+    const res = await fetch("/api/economy/tables/join", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        tenantId: input.tenantId,
+        action: "join",
+        tableCode: code,
+        nickname: input.nickname ?? null,
+      }),
     });
-    if (error || !Array.isArray(data) || data.length === 0) {
+    const payload = (await res.json()) as {
+      ok?: boolean;
+      table?: {
+        session_id?: string;
+        table_code?: string;
+        table_label?: string;
+      } | null;
+    };
+    if (!res.ok || !payload.ok || !payload.table) {
       writeCachedTable(input.tenantId, fallback);
       return fallback;
     }
-    const row = data[0] as JoinRow;
     const next: ActiveTable = {
-      code: row.table_code || code,
-      label: row.table_label || label,
-      sessionId: row.session_id,
+      code: payload.table.table_code || code,
+      label: payload.table.table_label || label,
+      sessionId: payload.table.session_id,
     };
     writeCachedTable(input.tenantId, next);
     return next;
@@ -145,13 +143,18 @@ export async function startVenueTableGame(input: {
   clientId: string;
   gameType: string;
 }): Promise<void> {
+  void input.clientId;
   try {
-    const supabase = getSupabase();
-    if (!supabase || !input.tenantId || !input.clientId) return;
-    await supabase.rpc("start_table_game", {
-      p_tenant_id: input.tenantId,
-      p_client_id: input.clientId,
-      p_game_type: input.gameType,
+    if (!input.tenantId || !input.gameType) return;
+    await fetch("/api/economy/tables/join", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        tenantId: input.tenantId,
+        action: "start",
+        gameType: input.gameType,
+      }),
     });
   } catch {
     // Admin live view is best-effort.
@@ -162,12 +165,17 @@ export async function endVenueTableGame(input: {
   tenantId: string;
   clientId: string;
 }): Promise<void> {
+  void input.clientId;
   try {
-    const supabase = getSupabase();
-    if (!supabase || !input.tenantId || !input.clientId) return;
-    await supabase.rpc("end_table_game", {
-      p_tenant_id: input.tenantId,
-      p_client_id: input.clientId,
+    if (!input.tenantId) return;
+    await fetch("/api/economy/tables/join", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        tenantId: input.tenantId,
+        action: "end",
+      }),
     });
   } catch {
     // ignore
@@ -188,17 +196,24 @@ export type LiveTableSession = {
   minutesInGame: number | null;
 };
 
+const LIVE_TABLE_MS = 2 * 60 * 1000;
+
+export type TableSessionQuery =
+  | { ok: true; rows: LiveTableSession[] }
+  | { ok: false };
+
 export async function fetchActiveTableSessions(
   tenantId: string,
-): Promise<LiveTableSession[]> {
+): Promise<TableSessionQuery> {
   try {
     const supabase = getSupabase();
-    if (!supabase || !tenantId) return [];
+    if (!supabase || !tenantId) return { ok: false };
     const { data, error } = await supabase.rpc("get_active_table_sessions", {
       p_tenant_id: tenantId,
     });
-    if (error || !Array.isArray(data)) return [];
-    return (
+    if (error || !Array.isArray(data)) return { ok: false };
+    const now = Date.now();
+    const rows = (
       data as Array<{
         session_id: string;
         table_code: string;
@@ -224,8 +239,12 @@ export async function fetchActiveTableSessions(
       lastSeenAt: row.last_seen_at,
       minutesAtTable: row.minutes_at_table,
       minutesInGame: row.minutes_in_game,
-    }));
+    })).filter((row) => {
+      const seen = Date.parse(row.lastSeenAt);
+      return Number.isFinite(seen) && now - seen <= LIVE_TABLE_MS;
+    });
+    return { ok: true, rows };
   } catch {
-    return [];
+    return { ok: false };
   }
 }

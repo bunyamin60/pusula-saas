@@ -76,7 +76,7 @@ export function RewardProgressBar({
           <button
             type="button"
             onClick={openClaim}
-            className="shrink-0 rounded-xl bg-[var(--bg-canvas)] px-3 py-2 font-sans text-xs font-bold text-[var(--text-headline)] transition hover:brightness-95 active:scale-95"
+            className="inline-flex min-h-12 shrink-0 items-center rounded-xl bg-[var(--bg-canvas)] px-4 font-sans text-xs font-bold text-[var(--text-headline)] transition hover:brightness-95 active:scale-95"
           >
             {copy.readyOpen}
           </button>

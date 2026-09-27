@@ -146,12 +146,19 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
 function TablesTab({ tenantId }: { tenantId: string }) {
   const copy = tenantConfig.copy.desk.tables;
   const [rows, setRows] = useState<LiveTableSession[] | null>(null);
+  const [offline, setOffline] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     setBusy(true);
     const next = await fetchActiveTableSessions(tenantId);
-    setRows(next);
+    if (!next.ok) {
+      setOffline(true);
+      setRows([]);
+    } else {
+      setOffline(false);
+      setRows(next.rows);
+    }
     setBusy(false);
   }, [tenantId]);
 
@@ -179,6 +186,10 @@ function TablesTab({ tenantId }: { tenantId: string }) {
       {rows == null ? (
         <p className="font-sans text-sm font-medium text-[var(--text-body)]">
           …
+        </p>
+      ) : offline ? (
+        <p className="rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-4 py-5 font-sans text-sm font-medium text-[var(--text-body)]">
+          {copy.offline}
         </p>
       ) : rows.length === 0 ? (
         <p className="rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-4 py-5 font-sans text-sm font-medium text-[var(--text-body)]">
@@ -254,7 +265,7 @@ function KasaTab({ tenantId }: { tenantId: string }) {
   async function redeem(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
-    const next = await redeemRewardCoupon(tenantId, code);
+    const next = await redeemRewardCoupon(tenantId, code, campaign.adminPassword);
     setResult(next);
     await refreshHistory();
     setBusy(false);
@@ -290,6 +301,9 @@ function KasaTab({ tenantId }: { tenantId: string }) {
         <h3 className="font-sans text-sm font-extrabold text-[var(--text-headline)]">
           {desk.stampsTitle}
         </h3>
+        <p className="font-sans text-sm font-medium text-[var(--text-body)]">
+          {desk.stampsLead}
+        </p>
         {stampRequests.length === 0 ? (
           <p className="font-sans text-sm font-medium text-[var(--text-body)]">
             {desk.stampsEmpty}
@@ -442,9 +456,6 @@ function VenueTab() {
     clampRewardDuration(campaign.durationMinutes || 20),
   );
   const [games, setGames] = useState<EnabledGames>(campaign.enabledGames);
-  const [venueMode, setVenueMode] = useState<"masa" | "kasa">(
-    campaign.venueMode === "kasa" ? "kasa" : "masa",
-  );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(false);
@@ -463,7 +474,6 @@ function VenueTab() {
     setHook(campaign.hook);
     setMinutes(clampRewardDuration(campaign.durationMinutes || 20));
     setGames(campaign.enabledGames);
-    setVenueMode(campaign.venueMode === "kasa" ? "kasa" : "masa");
   }, [
     campaign.brandName,
     campaign.logoUrl,
@@ -471,7 +481,6 @@ function VenueTab() {
     campaign.hook,
     campaign.durationMinutes,
     campaign.enabledGames,
-    campaign.venueMode,
   ]);
 
   async function persist(nextPalette: GuestPaletteId = paletteId) {
@@ -490,7 +499,6 @@ function VenueTab() {
         hook: rewardTitle,
         durationMinutes,
         enabledGames: games,
-        venueMode,
       });
       setSaved(true);
     } catch {
@@ -524,38 +532,6 @@ function VenueTab() {
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-body)]">
           {desk.identityTitle}
         </p>
-        <div className="mt-4 rounded-2xl border border-[var(--text-headline)]/10 bg-[var(--bg-canvas)] p-3">
-          <p className="font-sans text-xs font-extrabold text-[var(--text-headline)]">
-            {desk.modeTitle}
-          </p>
-          <p className="mt-1 font-sans text-[11px] font-medium text-[var(--text-body)]">
-            {desk.modeHint}
-          </p>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            {(
-              [
-                ["masa", desk.modeMasa],
-                ["kasa", desk.modeKasa],
-              ] as const
-            ).map(([id, label]) => {
-              const active = venueMode === id;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setVenueMode(id)}
-                  className={`min-h-12 rounded-xl px-3 font-sans text-sm font-extrabold transition active:scale-95 ${
-                    active
-                      ? "bg-[var(--btn-primary)] text-[var(--btn-text)]"
-                      : "border border-[var(--text-headline)]/10 bg-[var(--card-surface)] text-[var(--text-headline)]"
-                  }`}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
         <label className="mt-4 block">
           <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-body)]">
             {desk.brandLabel}
@@ -675,7 +651,7 @@ function VenueTab() {
           </span>
           <input
             type="range"
-            min={10}
+            min={1}
             max={45}
             step={1}
             value={minutes}
