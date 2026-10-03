@@ -1,49 +1,33 @@
-"use client";
+import { MerchantAdminDashboard } from "@/components/MerchantAdminDashboard";
+import { MerchantLogin } from "@/components/MerchantLogin";
+import { getMerchantAuthState } from "@/lib/merchantAuth";
+import { sanitizeTenantId } from "@/lib/tenant";
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { useParams } from "next/navigation";
-import { AdminDashboard } from "@/components/AdminDashboard";
-import { AdminLogin } from "@/components/AdminLogin";
-import {
-  getServerAdminAuth,
-  getAdminAuth,
-  lockAdmin,
-  readStoredAdminAuth,
-  setAdminAuth,
-  subscribeToAdminAuth,
-} from "@/lib/adminAuth";
-import { getActiveTenantId } from "@/lib/campaignState";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant";
+export const dynamic = "force-dynamic";
 
-export default function TenantAdminPage() {
-  const params = useParams<{ tenant?: string }>();
-  const tenantId = params.tenant ?? getActiveTenantId() ?? DEFAULT_TENANT_ID;
-  const authed = useSyncExternalStore(
-    subscribeToAdminAuth,
-    getAdminAuth,
-    getServerAdminAuth,
+export default async function TenantAdminPage({
+  params,
+}: {
+  params: Promise<{ tenant: string }>;
+}) {
+  const { tenant } = await params;
+  const venueSlug = sanitizeTenantId(tenant)?.toLowerCase() ?? tenant.toLowerCase();
+  const authState = await getMerchantAuthState(venueSlug);
+
+  if (authState.status === "authorized") {
+    return <MerchantAdminDashboard access={authState.access} />;
+  }
+
+  return (
+    <main className="min-h-dvh bg-[var(--bg-canvas)]">
+      <MerchantLogin
+        venueSlug={venueSlug}
+        initialMessage={
+          authState.status === "unauthorized"
+            ? "Bu oturumun bu mekana erişim yetkisi yok. Başka bir hesapla giriş yapın."
+            : undefined
+        }
+      />
+    </main>
   );
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    if (readStoredAdminAuth(tenantId)) setAdminAuth(true);
-    setReady(true);
-  }, [tenantId]);
-
-  const login = useCallback(() => setAdminAuth(true, tenantId), [tenantId]);
-  const logout = useCallback(() => lockAdmin(tenantId), [tenantId]);
-
-  if (!ready) {
-    return <main className="min-h-dvh bg-[var(--bg-canvas)]" />;
-  }
-
-  if (!authed) {
-    return (
-      <main className="min-h-dvh bg-[var(--bg-canvas)]">
-        <AdminLogin onSuccess={login} />
-      </main>
-    );
-  }
-
-  return <AdminDashboard onLogout={logout} />;
 }

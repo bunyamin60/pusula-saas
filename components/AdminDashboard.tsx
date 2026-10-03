@@ -56,6 +56,7 @@ import {
   type LiveTableSession,
 } from "@/lib/tableSession";
 import { useCampaign } from "@/lib/useCampaign";
+import type { MerchantRole } from "@/lib/merchantAuth";
 
 type DeskTab = "kasa" | "venue" | "gossip" | "metrics" | "tables";
 
@@ -69,7 +70,23 @@ const DESK_GAMES: CatalogGameId[] = [
   "bill",
 ];
 
-export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
+type MerchantContext = {
+  venueName: string;
+  role: MerchantRole;
+  email: string | null;
+};
+
+const MERCHANT_ROLE_LABELS: Record<MerchantRole, string> = {
+  owner: "İşletme sahibi",
+};
+
+export function AdminDashboard({
+  onLogout,
+  merchant,
+}: {
+  onLogout: () => void;
+  merchant?: MerchantContext;
+}) {
   const desk = tenantConfig.copy.desk;
   const campaign = useCampaign();
   const params = useParams<{ tenant?: string }>();
@@ -84,8 +101,14 @@ export function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           <div className="min-w-0 flex-1">
             <p className="font-display text-lg leading-tight text-[var(--text-headline)]">{desk.title}</p>
             <p className="truncate text-[11px] text-[var(--text-body)]">
-              {campaign.brandName || tenantConfig.brand.name}
+              {merchant?.venueName || campaign.brandName || tenantConfig.brand.name}
             </p>
+            {merchant ? (
+              <p className="truncate text-[10px] text-[var(--text-body)]/75">
+                {MERCHANT_ROLE_LABELS[merchant.role]}
+                {merchant.email ? ` · ${merchant.email}` : ""}
+              </p>
+            ) : null}
           </div>
           <div className="flex shrink-0 flex-col items-end gap-2">
             <Link
