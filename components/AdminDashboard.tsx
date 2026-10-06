@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { useParams } from "next/navigation";
 import { BrandWordmark } from "@/components/BrandWordmark";
 import { tenantConfig, type CatalogGameId, type EnabledGames, type GuestPaletteId } from "@/config/tenant.config";
@@ -52,9 +58,10 @@ import {
 } from "@/lib/tenant";
 import { applyThemeTokens } from "@/lib/themeCss";
 import {
-  fetchActiveTableSessions,
-  type LiveTableSession,
-} from "@/lib/tableSession";
+  fetchMerchantTableMonitor,
+  MERCHANT_TABLE_POLL_INTERVAL_MS,
+  type MerchantTableMonitor,
+} from "@/lib/merchantTables";
 import { useCampaign } from "@/lib/useCampaign";
 import type { MerchantRole } from "@/lib/merchantAuth";
 
@@ -168,28 +175,54 @@ export function AdminDashboard({
 
 function TablesTab({ tenantId }: { tenantId: string }) {
   const copy = tenantConfig.copy.desk.tables;
-  const [rows, setRows] = useState<LiveTableSession[] | null>(null);
+  const [monitor, setMonitor] = useState<MerchantTableMonitor | null>(null);
   const [offline, setOffline] = useState(false);
   const [busy, setBusy] = useState(false);
+  const mountedRef = useRef(false);
+  const inFlightRef = useRef(false);
+  const controllerRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
-    setBusy(true);
-    const next = await fetchActiveTableSessions(tenantId);
-    if (!next.ok) {
-      setOffline(true);
-      setRows([]);
-    } else {
-      setOffline(false);
-      setRows(next.rows);
+    if (inFlightRef.current) return;
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    inFlightRef.current = true;
+    if (mountedRef.current) setBusy(true);
+    try {
+      const next = await fetchMerchantTableMonitor(tenantId, controller.signal);
+      if (!mountedRef.current || controller.signal.aborted) return;
+      if (!next.ok) {
+        setOffline(true);
+      } else {
+        setOffline(false);
+        setMonitor(next.data);
+      }
+    } finally {
+      if (controllerRef.current === controller) {
+        controllerRef.current = null;
+        inFlightRef.current = false;
+        if (mountedRef.current) setBusy(false);
+      }
     }
-    setBusy(false);
   }, [tenantId]);
 
   useEffect(() => {
+    mountedRef.current = true;
     void load();
-    const timer = window.setInterval(() => void load(), 8_000);
-    return () => window.clearInterval(timer);
+    const timer = window.setInterval(
+      () => void load(),
+      MERCHANT_TABLE_POLL_INTERVAL_MS,
+    );
+    return () => {
+      mountedRef.current = false;
+      window.clearInterval(timer);
+      controllerRef.current?.abort();
+      controllerRef.current = null;
+      inFlightRef.current = false;
+    };
   }, [load]);
+
+  const nowMs = monitor ? Date.parse(monitor.updatedAt) : 0;
 
   return (
     <section className="space-y-4">
@@ -206,7 +239,7 @@ function TablesTab({ tenantId }: { tenantId: string }) {
           {copy.refresh}
         </button>
       </div>
-      {rows == null ? (
+      {monitor == null && !offline ? (
         <p className="font-sans text-sm font-medium text-[var(--text-body)]">
           …
         </p>
@@ -214,44 +247,135 @@ function TablesTab({ tenantId }: { tenantId: string }) {
         <p className="rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-4 py-5 font-sans text-sm font-medium text-[var(--text-body)]">
           {copy.offline}
         </p>
-      ) : rows.length === 0 ? (
-        <p className="rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-4 py-5 font-sans text-sm font-medium text-[var(--text-body)]">
-          {copy.empty}
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {rows.map((row) => (
-            <li
-              key={row.sessionId}
-              className="rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-4 py-3"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <p className="font-sans text-base font-extrabold text-[var(--text-headline)]">
-                  {row.tableLabel}
-                </p>
-                <p className="font-sans text-xs font-bold text-[var(--text-body)]">
-                  {row.nickname || "—"}
-                </p>
-              </div>
-              <p className="mt-1 font-sans text-sm font-medium text-[var(--text-body)]">
-                {row.gameType
-                  ? copy.playing
-                      .replace("{game}", row.gameType)
-                      .replace(
-                        "{minutes}",
-                        String(row.minutesInGame ?? 0),
-                      )
-                  : copy.seated.replace(
-                      "{minutes}",
-                      String(row.minutesAtTable),
-                    )}
-              </p>
-            </li>
-          ))}
-        </ul>
+      ) : monitor == null ? null : (
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            <TableSummaryCard
+              label={copy.totalTables}
+              value={monitor.summary.totalTables}
+            />
+            <TableSummaryCard
+              label={copy.activeTables}
+              value={monitor.summary.activeTables}
+            />
+            <TableSummaryCard
+              label={copy.activeGuests}
+              value={monitor.summary.activeGuests}
+            />
+          </div>
+          {monitor.tables.length === 0 ? (
+            <p className="rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-4 py-5 font-sans text-sm font-medium text-[var(--text-body)]">
+              {copy.noTables}
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {monitor.tables.map((table) => (
+                <li
+                  key={table.tableId}
+                  className="rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-4 py-3"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-sans text-base font-extrabold text-[var(--text-headline)]">
+                      {table.tableName}
+                    </p>
+                    <span
+                      className={`rounded-full px-2.5 py-1 font-sans text-[11px] font-extrabold ${
+                        table.state === "active"
+                          ? "bg-emerald-500/15 text-emerald-700"
+                          : "bg-[var(--bg-canvas)] text-[var(--text-body)]"
+                      }`}
+                    >
+                      {table.state === "active"
+                        ? copy.activeStatus
+                        : copy.emptyStatus}
+                    </span>
+                  </div>
+                  {table.state === "active" ? (
+                    <div className="mt-2 space-y-1 font-sans text-sm font-medium text-[var(--text-body)]">
+                      <p>
+                        {copy.playerCount.replace(
+                          "{count}",
+                          String(table.activeGuestCount),
+                        )}
+                      </p>
+                      {table.gameTypes.length > 0 ? (
+                        <p>
+                          {copy.games.replace(
+                            "{games}",
+                            table.gameTypes.map(formatTableGameType).join(", "),
+                          )}
+                        </p>
+                      ) : null}
+                      <p>
+                        {copy.lastActivity.replace(
+                          "{time}",
+                          formatRelativeActivity(table.lastActivityAt, nowMs),
+                        )}
+                      </p>
+                      <p>
+                        {copy.activeDuration.replace(
+                          "{duration}",
+                          formatActiveDuration(table.activeSince, nowMs),
+                        )}
+                      </p>
+                    </div>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </section>
   );
+}
+
+function TableSummaryCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-3 py-3 text-center">
+      <p className="font-display text-2xl font-bold tabular-nums text-[var(--text-headline)]">
+        {value}
+      </p>
+      <p className="mt-1 font-sans text-[10px] font-semibold leading-tight text-[var(--text-body)]">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+function formatTableGameType(gameType: string): string {
+  const labels = tenantConfig.copy.desk.venue.gameLabels;
+  const gameLabels: Record<string, string> = {
+    draw: labels.draw,
+    quiz: labels.quiz,
+    trivia: labels.quiz,
+    taboo: labels.taboo,
+    whoami: labels.whoami,
+    blockblast: labels.blockblast,
+    talk: labels.talk,
+    icebreaker: labels.talk,
+    bill: labels.bill,
+    wheel: labels.bill,
+  };
+  return gameLabels[gameType] ?? gameType;
+}
+
+function formatRelativeActivity(value: string | null, nowMs: number): string {
+  if (!value) return "—";
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "—";
+  const seconds = Math.max(0, Math.floor((nowMs - timestamp) / 1000));
+  if (seconds < 5) return "şimdi";
+  if (seconds < 60) return `${seconds} sn önce`;
+  return `${Math.floor(seconds / 60)} dk önce`;
+}
+
+function formatActiveDuration(value: string | null, nowMs: number): string {
+  if (!value) return "—";
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "—";
+  const minutes = Math.max(0, Math.floor((nowMs - timestamp) / 60_000));
+  return minutes < 1 ? "1 dakikadan az" : `${minutes} dk`;
 }
 
 function KasaTab({ tenantId }: { tenantId: string }) {
