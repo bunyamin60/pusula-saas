@@ -12,7 +12,7 @@ import {
 } from "react";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { readCustomerProfile } from "@/lib/customerProfile";
-import { readOrCreateClientId, readOrCreateIdentity } from "@/lib/duel";
+import { readOrCreateIdentity } from "@/lib/duel";
 
 const BOOT_MIN_MS = 900;
 /** Show loader only if a guarded async job is still pending after this delay. */
@@ -83,7 +83,6 @@ export function AppLoadingProvider({ children }: { children: ReactNode }) {
 
     async function boot() {
       try {
-        readOrCreateClientId();
         readOrCreateIdentity();
         readCustomerProfile();
       } catch {

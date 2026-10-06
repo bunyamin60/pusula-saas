@@ -5,6 +5,9 @@ export type ActiveTable = {
   code: string;
   label: string;
   sessionId?: string;
+  venueId?: string;
+  venueVerified?: boolean;
+  verificationExpiresAt?: string;
 };
 
 function storageKey(tenantId: string): string {
@@ -38,6 +41,9 @@ export function readCachedTable(tenantId: string): ActiveTable | null {
       code: parsed.code,
       label: parsed.label,
       sessionId: parsed.sessionId,
+      venueId: parsed.venueId,
+      venueVerified: parsed.venueVerified,
+      verificationExpiresAt: parsed.verificationExpiresAt,
     };
   } catch {
     return null;
@@ -50,6 +56,15 @@ export function writeCachedTable(tenantId: string, table: ActiveTable): void {
     window.localStorage.setItem(storageKey(tenantId), JSON.stringify(table));
   } catch {
     // ignore
+  }
+}
+
+export function clearCachedTable(tenantId: string): void {
+  if (typeof window === "undefined" || !tenantId) return;
+  try {
+    window.localStorage.removeItem(storageKey(tenantId));
+  } catch {
+    // Storage is optional on locked-down browsers.
   }
 }
 
@@ -89,52 +104,282 @@ export function readTableCodeFromLocation(): string | null {
   }
 }
 
+export type VenueEntryFailureReason =
+  | "invalid_request"
+  | "invalid_table"
+  | "venue_location_unconfigured"
+  | "location_required"
+  | "invalid_location"
+  | "inaccurate_location"
+  | "outside_venue"
+  | "active_session_required"
+  | "location_permission_denied"
+  | "location_unavailable"
+  | "location_timeout"
+  | "verification_failed";
+
+export type VenueEntryResult =
+  | {
+      ok: true;
+      guestId: string;
+      table: ActiveTable;
+      warning?: VenueEntryFailureReason;
+    }
+  | {
+      ok: false;
+      reason: VenueEntryFailureReason;
+      guestId?: string;
+      table?: ActiveTable;
+    };
+
+type VerifiedTablePayload = {
+  sessionId: string;
+  tableId: string;
+  tableName: string;
+  venueId: string;
+  venueVerified: boolean;
+  verificationExpiresAt: string | null;
+};
+
+function activeTableFromPayload(table: VerifiedTablePayload): ActiveTable {
+  return {
+    code: table.tableId,
+    label: table.tableName,
+    sessionId: table.sessionId,
+    venueId: table.venueId,
+    venueVerified: table.venueVerified,
+    verificationExpiresAt: table.verificationExpiresAt ?? undefined,
+  };
+}
+
+function softEntryFrom(
+  tenantId: string,
+  entry: Extract<VenueEntryResult, { ok: false }>,
+  warning: VenueEntryFailureReason,
+): VenueEntryResult {
+  if (!entry.guestId || !entry.table) return { ok: false, reason: warning };
+  const table = { ...entry.table, venueVerified: false };
+  writeCachedTable(tenantId, table);
+  return { ok: true, guestId: entry.guestId, table, warning };
+}
+
+function isSoftVenueFailure(reason: VenueEntryFailureReason): boolean {
+  return (
+    reason === "venue_location_unconfigured" ||
+    reason === "location_required" ||
+    reason === "invalid_location" ||
+    reason === "inaccurate_location" ||
+    reason === "outside_venue" ||
+    reason === "location_permission_denied" ||
+    reason === "location_unavailable" ||
+    reason === "location_timeout"
+  );
+}
+
+async function requestVenueEntry(input: {
+  tenantId: string;
+  publicToken?: string;
+  location?: { latitude: number; longitude: number; accuracy: number };
+}): Promise<VenueEntryResult> {
+  try {
+    const response = await fetch("/api/guest/table/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        tenantId: input.tenantId,
+        ...(input.publicToken ? { publicToken: input.publicToken } : {}),
+        ...(input.location ?? {}),
+      }),
+    });
+    const payload = (await response.json()) as {
+      ok?: boolean;
+      guestId?: string;
+      reason?: VenueEntryFailureReason;
+      warning?: VenueEntryFailureReason;
+      table?: VerifiedTablePayload;
+    };
+    const table = payload.table
+      ? activeTableFromPayload(payload.table)
+      : undefined;
+    if (!response.ok || !payload.ok || !payload.guestId || !table) {
+      if (table) writeCachedTable(input.tenantId, table);
+      return {
+        ok: false,
+        reason: payload.reason ?? "verification_failed",
+        ...(payload.guestId ? { guestId: payload.guestId } : {}),
+        ...(table ? { table } : {}),
+      };
+    }
+
+    writeCachedTable(input.tenantId, table);
+    return {
+      ok: true,
+      guestId: payload.guestId,
+      table,
+      ...(payload.warning ? { warning: payload.warning } : {}),
+    };
+  } catch {
+    return { ok: false, reason: "verification_failed" };
+  }
+}
+
+function readBrowserLocation(): Promise<{
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+}> {
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      reject(new Error("location_unavailable"));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+        });
+      },
+      (error) => {
+        if (error.code === 1) reject(new Error("location_permission_denied"));
+        else if (error.code === 3) reject(new Error("location_timeout"));
+        else reject(new Error("location_unavailable"));
+      },
+      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 60_000 },
+    );
+  });
+}
+
+export async function verifyVenueTableEntry(input: {
+  tenantId: string;
+  publicToken: string;
+}): Promise<VenueEntryResult> {
+  const publicToken = normalizeTableCode(input.publicToken);
+  if (!input.tenantId || !publicToken) {
+    return { ok: false, reason: "invalid_request" };
+  }
+
+  const existing = await requestVenueEntry({
+    tenantId: input.tenantId,
+    publicToken,
+  });
+  if (existing.ok || existing.reason !== "location_required") return existing;
+
+  try {
+    const location = await readBrowserLocation();
+    const verified = await requestVenueEntry({
+      tenantId: input.tenantId,
+      publicToken,
+      location,
+    });
+    if (!verified.ok && isSoftVenueFailure(verified.reason)) {
+      return softEntryFrom(input.tenantId, existing, verified.reason);
+    }
+    return verified;
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : "location_unavailable";
+    if (
+      reason === "location_permission_denied" ||
+      reason === "location_timeout" ||
+      reason === "location_unavailable"
+    ) {
+      return softEntryFrom(input.tenantId, existing, reason);
+    }
+    return softEntryFrom(input.tenantId, existing, "location_unavailable");
+  }
+}
+
+export async function reverifyActiveVenueSession(input: {
+  tenantId: string;
+}): Promise<VenueEntryResult> {
+  if (!input.tenantId) return { ok: false, reason: "invalid_request" };
+  try {
+    const location = await readBrowserLocation();
+    return await requestVenueEntry({ tenantId: input.tenantId, location });
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : "location_unavailable";
+    if (
+      reason === "location_permission_denied" ||
+      reason === "location_timeout" ||
+      reason === "location_unavailable"
+    ) {
+      return { ok: false, reason };
+    }
+    return { ok: false, reason: "location_unavailable" };
+  }
+}
+
 export async function joinVenueTable(input: {
   tenantId: string;
   tableCode: string;
   clientId: string;
   nickname?: string;
 }): Promise<ActiveTable | null> {
-  const code = normalizeTableCode(input.tableCode);
-  if (!code || !input.tenantId) return null;
+  void input.clientId;
+  void input.nickname;
+  const result = await verifyVenueTableEntry({
+    tenantId: input.tenantId,
+    publicToken: input.tableCode,
+  });
+  return result.ok ? result.table : null;
+}
 
-  const label = formatTableLabel(code);
-  const fallback: ActiveTable = { code, label };
+type GuestSessionPayload = {
+  ok?: boolean;
+  guestId?: string;
+  table?: {
+    sessionId?: string;
+    tableId?: string;
+    tableName?: string;
+    venueId?: string;
+    venueVerified?: boolean;
+    verificationExpiresAt?: string | null;
+  } | null;
+};
 
+export async function syncGuestTableSession(input: {
+  tenantId: string;
+  action?: "touch" | "start" | "end";
+  nickname?: string;
+  gameType?: string;
+}): Promise<{ guestId: string; table: ActiveTable | null } | null> {
+  if (!input.tenantId) return null;
   try {
-    const res = await fetch("/api/economy/tables/join", {
+    const response = await fetch("/api/guest/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
       body: JSON.stringify({
         tenantId: input.tenantId,
-        action: "join",
-        tableCode: code,
+        action: input.action ?? "touch",
         nickname: input.nickname ?? null,
+        gameType: input.gameType ?? null,
       }),
     });
-    const payload = (await res.json()) as {
-      ok?: boolean;
-      table?: {
-        session_id?: string;
-        table_code?: string;
-        table_label?: string;
-      } | null;
-    };
-    if (!res.ok || !payload.ok || !payload.table) {
-      writeCachedTable(input.tenantId, fallback);
-      return fallback;
-    }
-    const next: ActiveTable = {
-      code: payload.table.table_code || code,
-      label: payload.table.table_label || label,
-      sessionId: payload.table.session_id,
-    };
-    writeCachedTable(input.tenantId, next);
-    return next;
+    const payload = (await response.json()) as GuestSessionPayload;
+    if (!response.ok || !payload.ok || !payload.guestId) return null;
+
+    const table =
+      payload.table?.sessionId && payload.table.tableId && payload.table.tableName
+        ? {
+            code: payload.table.tableId,
+            label: payload.table.tableName,
+            sessionId: payload.table.sessionId,
+            venueId: payload.table.venueId,
+            venueVerified: payload.table.venueVerified,
+            verificationExpiresAt:
+              payload.table.verificationExpiresAt ?? undefined,
+          }
+        : null;
+    if (table) writeCachedTable(input.tenantId, table);
+    else clearCachedTable(input.tenantId);
+    return { guestId: payload.guestId, table };
   } catch {
-    writeCachedTable(input.tenantId, fallback);
-    return fallback;
+    return null;
   }
 }
 
@@ -144,21 +389,12 @@ export async function startVenueTableGame(input: {
   gameType: string;
 }): Promise<void> {
   void input.clientId;
-  try {
-    if (!input.tenantId || !input.gameType) return;
-    await fetch("/api/economy/tables/join", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({
-        tenantId: input.tenantId,
-        action: "start",
-        gameType: input.gameType,
-      }),
-    });
-  } catch {
-    // Admin live view is best-effort.
-  }
+  if (!input.tenantId || !input.gameType) return;
+  await syncGuestTableSession({
+    tenantId: input.tenantId,
+    action: "start",
+    gameType: input.gameType,
+  });
 }
 
 export async function endVenueTableGame(input: {
@@ -166,20 +402,8 @@ export async function endVenueTableGame(input: {
   clientId: string;
 }): Promise<void> {
   void input.clientId;
-  try {
-    if (!input.tenantId) return;
-    await fetch("/api/economy/tables/join", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({
-        tenantId: input.tenantId,
-        action: "end",
-      }),
-    });
-  } catch {
-    // ignore
-  }
+  if (!input.tenantId) return;
+  await syncGuestTableSession({ tenantId: input.tenantId, action: "end" });
 }
 
 export type LiveTableSession = {

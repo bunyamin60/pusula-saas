@@ -40,8 +40,16 @@ function CoffeeBean({ className }: { className?: string }) {
   );
 }
 
-export function LoadingScreen() {
-  const message = tenantConfig.copy.loading.message;
+export function LoadingScreen({
+  message: messageOverride,
+  actionLabel,
+  onAction,
+}: {
+  message?: string;
+  actionLabel?: string;
+  onAction?: () => void;
+} = {}) {
+  const message = messageOverride ?? tenantConfig.copy.loading.message;
 
   return (
     <div className="fixed inset-0 z-[100] flex h-[100dvh] w-screen items-center justify-center bg-[var(--bg-canvas)] px-6">
@@ -86,6 +94,15 @@ export function LoadingScreen() {
         <p className="mt-6 animate-pulse text-center font-sans text-sm font-medium tracking-wide text-[var(--text-body)]">
           {message}
         </p>
+        {actionLabel && onAction ? (
+          <button
+            type="button"
+            onClick={onAction}
+            className="mt-5 min-h-11 rounded-2xl bg-[var(--btn-primary)] px-6 font-semibold text-[var(--btn-text)] active:scale-[0.98]"
+          >
+            {actionLabel}
+          </button>
+        ) : null}
       </div>
     </div>
   );

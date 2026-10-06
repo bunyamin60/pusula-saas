@@ -68,41 +68,8 @@ export function enabledGameIds(enabled: EnabledGames): DuelGameId[] {
   return DUEL_GAME_IDS.filter((id) => enabled[id]);
 }
 
-export function makeDuelClientId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-const CLIENT_ID_STORAGE_KEY = "duel_client_id";
 const IDENTITY_STORAGE_KEY = "duel_identity";
 const MATCH_STORAGE_KEY = "duel_active_match";
-
-/**
- * Reuses the same clientId across a page refresh (sessionStorage is scoped to
- * the tab and cleared on real tab close), so a reloading player keeps their
- * identity and can rejoin an in-progress match room.
- */
-export function readOrCreateClientId(): string {
-  if (typeof window !== "undefined") {
-    try {
-      const existing = window.sessionStorage.getItem(CLIENT_ID_STORAGE_KEY);
-      if (existing) return existing;
-    } catch {
-      // ignore storage errors, fall through to a fresh id
-    }
-  }
-  const created = makeDuelClientId();
-  if (typeof window !== "undefined") {
-    try {
-      window.sessionStorage.setItem(CLIENT_ID_STORAGE_KEY, created);
-    } catch {
-      // ignore storage errors
-    }
-  }
-  return created;
-}
 
 export function persistIdentity(identity: DuelIdentity): void {
   if (typeof window === "undefined") return;

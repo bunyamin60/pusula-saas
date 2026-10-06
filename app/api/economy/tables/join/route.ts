@@ -1,159 +1,131 @@
 import { NextResponse } from "next/server";
 import { applyDeviceCookie, resolveDevice } from "@/lib/deviceCookie";
-import { economyClient, readTenantId } from "@/lib/economyServer";
-import { formatTableLabel, normalizeTableCode } from "@/lib/tableSession";
+import {
+  isUuid,
+  joinGuestTable,
+  touchGuestTable,
+  type VenueVerificationStatus,
+} from "@/lib/guestSessionServer";
+import { sanitizeTenantId } from "@/lib/tenant";
 
-async function joinTable(
-  tenantId: string,
-  deviceId: string,
-  tableCode: string,
-  nickname: string | null,
-) {
-  const code = normalizeTableCode(tableCode);
-  if (!code) return { ok: false as const, reason: "invalid" };
-  const admin = economyClient();
-  const label = formatTableLabel(code);
-  const { data: table, error: tableError } = await admin
-    .from("tables")
-    .upsert(
-      {
-        tenant_id: tenantId,
-        code,
-        label,
-        is_active: true,
-        sort_order: /^\d+$/.test(code) ? Number(code) : 0,
-      },
-      { onConflict: "tenant_id,code" },
-    )
-    .select("id, code, label")
-    .single();
-  if (tableError || !table) {
-    return { ok: false as const, reason: tableError?.message || "table" };
-  }
-
-  const now = new Date().toISOString();
-  const { data: existing } = await admin
-    .from("table_sessions")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .eq("client_id", deviceId)
-    .eq("status", "active")
-    .maybeSingle();
-
-  const patch = {
-    table_id: table.id,
-    table_code: table.code,
-    status: "active",
-    ended_at: null,
-    last_seen_at: now,
-    ...(nickname ? { nickname } : {}),
-  };
-
-  if (existing?.id) {
-    const { error } = await admin.from("table_sessions").update(patch).eq("id", existing.id);
-    if (error) return { ok: false as const, reason: error.message };
-    return {
-      ok: true as const,
-      table: {
-        session_id: existing.id,
-        table_code: table.code,
-        table_label: table.label,
-      },
-    };
-  }
-
-  const { data: inserted, error: insertError } = await admin
-    .from("table_sessions")
-    .insert({
-      tenant_id: tenantId,
-      client_id: deviceId,
-      ...patch,
-    })
-    .select("id")
-    .single();
-  if (insertError || !inserted) {
-    return { ok: false as const, reason: insertError?.message || "session" };
-  }
-  return {
-    ok: true as const,
-    table: {
-      session_id: inserted.id,
-      table_code: table.code,
-      table_label: table.label,
-    },
-  };
+function joinStatusCode(reason: VenueVerificationStatus): number {
+  if (reason === "location_required") return 428;
+  if (reason === "invalid_table") return 404;
+  if (reason === "venue_location_unconfigured") return 503;
+  if (reason === "inaccurate_location" || reason === "outside_venue") return 403;
+  return 400;
 }
 
+function optionalNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Transitional adapter for callers that still post to the legacy URL.
+ * A join now accepts only a V2 public_token and never writes legacy tables.
+ */
 export async function POST(request: Request) {
+  const device = await resolveDevice(request);
+
   try {
-    const device = await resolveDevice(request);
     const body = (await request.json()) as {
-      tenantId?: string;
-      action?: string;
-      tableCode?: string;
-      gameType?: string;
-      nickname?: string | null;
+      tenantId?: unknown;
+      action?: unknown;
+      tableCode?: unknown;
+      gameType?: unknown;
+      nickname?: unknown;
+      latitude?: unknown;
+      longitude?: unknown;
+      accuracy?: unknown;
     };
-    const tenantId = readTenantId(body, request);
-    const action = body.action === "start" || body.action === "end" ? body.action : "join";
-    const supabase = economyClient();
+    const tenantId =
+      typeof body.tenantId === "string"
+        ? sanitizeTenantId(body.tenantId)?.toLowerCase() ?? null
+        : null;
+    const action =
+      body.action === "start" || body.action === "end" ? body.action : "join";
 
-    if (action === "start") {
-      const gameType = typeof body.gameType === "string" ? body.gameType.trim() : "";
-      const { error } = await supabase.rpc("start_table_game", {
-        p_tenant_id: tenantId,
-        p_client_id: device.id,
-        p_game_type: gameType,
+    if (!tenantId) {
+      return applyDeviceCookie(
+        NextResponse.json({ ok: false, reason: "invalid-request" }, { status: 400 }),
+        device.token,
+        device.fresh,
+      );
+    }
+
+    if (action === "join") {
+      const publicToken =
+        typeof body.tableCode === "string" ? body.tableCode.trim() : "";
+      if (!isUuid(publicToken)) {
+        return applyDeviceCookie(
+          NextResponse.json({ ok: false, reason: "invalid-table" }, { status: 404 }),
+          device.token,
+          device.fresh,
+        );
+      }
+
+      const result = await joinGuestTable({
+        guestId: device.id,
+        venueSlug: tenantId,
+        publicToken,
+        latitude: optionalNumber(body.latitude),
+        longitude: optionalNumber(body.longitude),
+        accuracy: optionalNumber(body.accuracy),
       });
+      if (!result.ok) {
+        return applyDeviceCookie(
+          NextResponse.json(
+            { ok: false, reason: result.status },
+            { status: joinStatusCode(result.status) },
+          ),
+          device.token,
+          device.fresh,
+        );
+      }
+
+      const { table } = result;
       return applyDeviceCookie(
-        NextResponse.json(error ? { ok: false, reason: error.message } : { ok: true }),
+        NextResponse.json({
+          ok: true,
+          table: {
+            session_id: table.sessionId,
+            table_code: table.tableId,
+            table_label: table.tableName,
+          },
+        }),
         device.token,
         device.fresh,
       );
     }
 
-    if (action === "end") {
-      const { error } = await supabase.rpc("end_table_game", {
-        p_tenant_id: tenantId,
-        p_client_id: device.id,
-      });
+    const gameType =
+      typeof body.gameType === "string" ? body.gameType.trim().slice(0, 64) : "";
+    if (action === "start" && !gameType) {
       return applyDeviceCookie(
-        NextResponse.json(error ? { ok: false, reason: error.message } : { ok: true }),
+        NextResponse.json({ ok: false, reason: "invalid-request" }, { status: 400 }),
         device.token,
         device.fresh,
       );
     }
 
-    const tableCode = typeof body.tableCode === "string" ? body.tableCode.trim() : "";
-    if (!tableCode) {
-      return applyDeviceCookie(
-        NextResponse.json({ ok: false, reason: "invalid" }, { status: 400 }),
-        device.token,
-        device.fresh,
-      );
-    }
-    const nickname =
-      typeof body.nickname === "string" ? body.nickname.trim().slice(0, 32) : null;
-    const joined = await joinTable(tenantId, device.id, tableCode, nickname);
-    if (!joined.ok) {
-      return applyDeviceCookie(
-        NextResponse.json(
-          { ok: false, reason: joined.reason },
-          { status: joined.reason === "invalid" ? 400 : 500 },
-        ),
-        device.token,
-        device.fresh,
-      );
-    }
+    const table = await touchGuestTable({
+      guestId: device.id,
+      venueSlug: tenantId,
+      action,
+      nickname:
+        typeof body.nickname === "string" ? body.nickname.trim().slice(0, 32) : null,
+      gameType: gameType || null,
+    });
     return applyDeviceCookie(
-      NextResponse.json({ ok: true, table: joined.table }),
+      NextResponse.json({ ok: true, table }),
       device.token,
       device.fresh,
     );
-  } catch (error) {
-    return NextResponse.json(
-      { ok: false, reason: error instanceof Error ? error.message : "failed" },
-      { status: 500 },
+  } catch {
+    return applyDeviceCookie(
+      NextResponse.json({ ok: false, reason: "guest-session-failed" }, { status: 500 }),
+      device.token,
+      device.fresh,
     );
   }
 }

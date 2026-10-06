@@ -23,7 +23,6 @@ import {
   generateIdentity,
   persistActiveMatch,
   persistIdentity,
-  readOrCreateClientId,
   readOrCreateIdentity,
   readPersistedMatch,
   makeMatchId,
@@ -56,6 +55,7 @@ type IncomingChallenge = {
 
 type DuelContextValue = {
   tenantId: string;
+  venueVerified: boolean;
   ready: boolean;
   enabledGames: DuelGameId[];
   identity: DuelIdentity;
@@ -114,9 +114,13 @@ export function DuelStage() {
 
 export function DuelProvider({
   tenantId,
+  clientId,
+  venueVerified,
   children,
 }: {
   tenantId: string;
+  clientId: string;
+  venueVerified: boolean;
   children: ReactNode;
 }) {
   const copy = tenantConfig.copy.duel;
@@ -134,7 +138,6 @@ export function DuelProvider({
   const outgoingRef = useRef<OutgoingChallenge | null>(null);
   const incomingRef = useRef<IncomingChallenge | null>(null);
 
-  const [clientId] = useState(readOrCreateClientId);
   const [identity, setIdentity] = useState<DuelIdentity>(readOrCreateIdentity);
   const [peers, setPeers] = useState<DuelPlayer[]>([]);
   const [connected, setConnected] = useState(false);
@@ -190,7 +193,7 @@ export function DuelProvider({
   }, [player]);
 
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase || !venueVerified) return;
     const client = supabase;
     let cancelled = false;
     let joining = false;
@@ -379,6 +382,7 @@ export function DuelProvider({
     setActiveMatch,
     supabase,
     tenantId,
+    venueVerified,
   ]);
 
   useEffect(() => {
@@ -455,6 +459,7 @@ export function DuelProvider({
 
   const sendChallenge = useCallback(
     (target: DuelPlayer) => {
+      if (!venueVerified) return;
       if (outgoingRef.current || incomingRef.current) return;
       if (match != null || drawRoomId != null) return;
       const gameId = resolveGameForMatch(selectedGame, enabled, target.games);
@@ -480,7 +485,7 @@ export function DuelProvider({
       });
       setOutgoingChallenge(nextChallenge);
     },
-    [drawRoomId, enabled, match, player, selectedGame, tenantId],
+    [drawRoomId, enabled, match, player, selectedGame, tenantId, venueVerified],
   );
 
   const cancelOutgoingChallenge = useCallback(() => {
@@ -540,35 +545,36 @@ export function DuelProvider({
   const exitMatch = useCallback(() => setActiveMatch(null), [setActiveMatch]);
 
   const joinDrawRoom = useCallback((roomId: string) => {
-    if (match != null) return;
+    if (!venueVerified || match != null) return;
     incomingRef.current = null;
     outgoingRef.current = null;
     setIncomingChallenge(null);
     setOutgoingChallenge(null);
     setDrawRoomId(roomId);
-  }, [match]);
+  }, [match, venueVerified]);
 
   const leaveDrawRoom = useCallback(() => setDrawRoomId(null), []);
 
   const value = useMemo<DuelContextValue>(
     () => ({
       tenantId,
-      ready: enabled.length > 0,
+      venueVerified,
+      ready: venueVerified && enabled.length > 0,
       enabledGames: enabled,
       identity,
       rerollIdentity,
       chooseIdentity,
       peers,
-      connected,
-      connectionError,
+      connected: venueVerified && connected,
+      connectionError: !venueVerified || connectionError,
       player,
       selectedGame,
       setSelectedGame,
       sendChallenge,
-      inMatch: match != null,
-      inDrawRoom: drawRoomId != null,
-      match,
-      drawRoomId,
+      inMatch: venueVerified && match != null,
+      inDrawRoom: venueVerified && drawRoomId != null,
+      match: venueVerified ? match : null,
+      drawRoomId: venueVerified ? drawRoomId : null,
       exitMatch,
       joinDrawRoom,
       leaveDrawRoom,
@@ -590,6 +596,7 @@ export function DuelProvider({
       selectedGame,
       sendChallenge,
       tenantId,
+      venueVerified,
     ],
   );
 
