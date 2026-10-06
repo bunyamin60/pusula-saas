@@ -1,31 +1,15 @@
 import { NextResponse } from "next/server";
 import { applyDeviceCookie, resolveDevice } from "@/lib/deviceCookie";
-import { economyClient, readTenantId } from "@/lib/economyServer";
+import {
+  logEconomyError,
+  resetGuestPlaySessions,
+} from "@/lib/economyV2Server";
 
 export async function POST(request: Request) {
   try {
     const device = await resolveDevice(request);
-    const body = (await request.json().catch(() => null)) as {
-      tenantId?: string;
-    } | null;
-    const tenantId = readTenantId(body, request);
-
-    const { error } = await economyClient()
-      .from("play_sessions")
-      .delete()
-      .eq("tenant_id", tenantId)
-      .eq("device_id", device.id);
-
-    if (error) {
-      return applyDeviceCookie(
-        NextResponse.json(
-          { ok: false, reason: error.message || "offline" },
-          { status: 500 },
-        ),
-        device.token,
-        device.fresh,
-      );
-    }
+    await request.json().catch(() => null);
+    await resetGuestPlaySessions(device.id);
 
     return applyDeviceCookie(
       NextResponse.json({ ok: true }),
@@ -33,8 +17,9 @@ export async function POST(request: Request) {
       device.fresh,
     );
   } catch (error) {
+    logEconomyError("play-reset", error);
     return NextResponse.json(
-      { ok: false, reason: error instanceof Error ? error.message : "failed" },
+      { ok: false, reason: "play-reset-failed" },
       { status: 500 },
     );
   }

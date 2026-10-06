@@ -69,9 +69,11 @@ export async function awardXp(input: {
   score?: number | null;
 }): Promise<XpAwardResult> {
   try {
+    // Identity and venue/table context are resolved by the server. These
+    // client values remain in the call signature only for legacy callers.
+    void input.tenantId;
+    void input.clientId;
     return await postJson<XpAwardResult>("/api/economy/xp", {
-      tenantId: input.tenantId,
-      clientId: input.clientId,
       activityName: input.activityName,
       score: input.score ?? null,
     });

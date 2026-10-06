@@ -13,6 +13,7 @@ import {
   formatPlayClock,
   getClientPlayReward,
   getServerPlayReward,
+  isPlayRewardAccrualAllowed,
   playRewardTargetMinutes,
   playRewardTargetSeconds,
   sealPlayRewardClaim,
@@ -25,6 +26,11 @@ export function useRewardTimer(isGameActive: boolean) {
     subscribePlayReward,
     getClientPlayReward,
     getServerPlayReward,
+  );
+  const accrualAllowed = useSyncExternalStore(
+    subscribePlayReward,
+    isPlayRewardAccrualAllowed,
+    () => false,
   );
   // Recompute target when admin changes ikram süresi.
   useSyncExternalStore(subscribeToCampaign, getCampaignSettings, getServerCampaign);
@@ -100,9 +106,12 @@ export function useRewardTimer(isGameActive: boolean) {
     remainingSeconds: Math.max(0, targetSeconds - elapsedSeconds),
     progress: Math.min(1, Math.max(0, ratio)),
     isUnlocked:
-      progress.isUnlocked || elapsedSeconds >= Math.max(1, targetSeconds - 1),
+      Boolean(progress.claimedCode) ||
+      (accrualAllowed &&
+        (progress.isUnlocked || elapsedSeconds >= Math.max(1, targetSeconds - 1))),
     isGameActive,
-    isPaused: !isGameActive,
+    isPaused: !isGameActive || !accrualAllowed,
+    accrualAllowed,
     claimedCode: progress.claimedCode,
     redeemedAt: progress.redeemedAt ?? null,
     recipeId: progress.recipeId ?? null,

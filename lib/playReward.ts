@@ -23,6 +23,7 @@ type Listener = () => void;
 const listeners = new Set<Listener>();
 const RESET_FLAG = "arada_reward_reset";
 let memory: PlayRewardProgress | null = null;
+let serverAccrualAllowed = false;
 
 function rewardResetPending(): boolean {
   return (
@@ -120,8 +121,13 @@ export function getClientPlayReward(): PlayRewardProgress {
   return memory;
 }
 
+export function isPlayRewardAccrualAllowed(): boolean {
+  return serverAccrualAllowed;
+}
+
 export function clearPlayRewardProgress(): void {
   memory = { ...EMPTY };
+  serverAccrualAllowed = false;
   if (canUseStorage()) {
     localStorage.removeItem(playRewardStorageKey());
   }
@@ -297,11 +303,13 @@ export function applyServerPlayProgress(input: {
   elapsedSeconds: number;
   targetSeconds: number;
   claimedCode: string | null;
+  accrualAllowed: boolean;
 }): PlayRewardProgress {
   const clientTarget = playRewardTargetSeconds();
   const current = getClientPlayReward();
   const serverElapsed = Math.max(0, Math.floor(input.elapsedSeconds) || 0);
-  const claimed = input.claimedCode?.trim() || null;
+  const claimed = input.claimedCode?.trim() || current.claimedCode || null;
+  serverAccrualAllowed = input.accrualAllowed;
   if (rewardResetPending() && (claimed || serverElapsed > 0)) {
     return current;
   }
@@ -314,10 +322,12 @@ export function applyServerPlayProgress(input: {
   }
   const elapsed = claimed
     ? clientTarget
-    : Math.min(clientTarget, Math.max(current.elapsedSeconds, serverElapsed));
+    : Math.min(clientTarget, serverElapsed);
   const next: PlayRewardProgress = {
     elapsedSeconds: elapsed,
-    isUnlocked: Boolean(claimed) || elapsed >= Math.max(1, clientTarget - 1),
+    isUnlocked:
+      Boolean(claimed) ||
+      (input.accrualAllowed && elapsed >= Math.max(1, clientTarget - 1)),
     claimedCode: claimed,
     lastPing: current.lastPing,
     recipeId: memory?.recipeId ?? readStored().recipeId,
@@ -345,17 +355,26 @@ function revealPlayCoupon(): void {
 async function postPlayHeartbeat(
   tenantId: string,
   playing: boolean,
-): Promise<PlayRewardProgress | null> {
+): Promise<
+  | (PlayRewardProgress & {
+      accrualAllowed: boolean;
+      reason: string | null;
+    })
+  | null
+> {
   try {
+    void tenantId;
     const previousCode = getClientPlayReward().claimedCode;
     const res = await fetch("/api/economy/play/heartbeat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
-      body: JSON.stringify({ tenantId, playing }),
+      body: JSON.stringify({ playing }),
     });
     const data = (await res.json()) as {
       ok?: boolean;
+      reason?: string;
+      accrual_allowed?: boolean;
       elapsed_seconds?: number;
       target_seconds?: number;
       coupon_code?: string | null;
@@ -365,9 +384,14 @@ async function postPlayHeartbeat(
       elapsedSeconds: Number(data.elapsed_seconds) || 0,
       targetSeconds: Number(data.target_seconds) || playRewardTargetSeconds(),
       claimedCode: typeof data.coupon_code === "string" ? data.coupon_code : null,
+      accrualAllowed: data.accrual_allowed === true,
     });
     if (next.claimedCode && next.claimedCode !== previousCode) revealPlayCoupon();
-    return next;
+    return {
+      ...next,
+      accrualAllowed: data.accrual_allowed === true,
+      reason: typeof data.reason === "string" ? data.reason : null,
+    };
   } catch {
     return null;
   }
@@ -376,7 +400,7 @@ async function postPlayHeartbeat(
 export async function syncPlayHeartbeat(
   tenantId: string,
   playing: boolean,
-): Promise<PlayRewardProgress | null> {
+): ReturnType<typeof postPlayHeartbeat> {
   return postPlayHeartbeat(tenantId, playing);
 }
 
@@ -397,6 +421,10 @@ export function applyPlayRewardTick(
   const current = getClientPlayReward();
   const targetSeconds = playRewardTargetSeconds();
   const { maxCreditSeconds } = tenantConfig.playReward;
+
+  if (!serverAccrualAllowed) {
+    return persist({ ...current, lastPing: now });
+  }
 
   if (current.isUnlocked && current.elapsedSeconds >= targetSeconds) {
     return current;
