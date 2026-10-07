@@ -1,34 +1,30 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DuelLeaderboard } from "@/components/DuelLeaderboard";
 import { GameCountdown } from "@/components/GameCountdown";
 import { useDuel } from "@/components/DuelProvider";
 import { tenantConfig } from "@/config/tenant.config";
 import { readCustomerProfile } from "@/lib/customerProfile";
-import {
-  submitQuizScore,
-  type QuizLeaderboardEntry,
-} from "@/lib/duelLeaderboard";
+import type { QuizLeaderboardEntry } from "@/lib/duelLeaderboard";
 import { awardXp } from "@/lib/economy";
 import {
-  getQuizCategory,
+  QUIZ_CATEGORY_IDS,
   quizCategoryTitle,
   type QuizCategoryId,
   type QuizQuestion,
 } from "@/lib/quizBank";
+import {
+  answerQuizQuestion,
+  beginQuizQuestion,
+  createQuizAttempt,
+  type QuizAnswer,
+} from "@/lib/quizAttempt";
 import { getActiveTableLabel } from "@/lib/tableSession";
 import { writeLobbyRaceFocus, writeLobbyTab, writeVenueHomeView } from "@/lib/venueHome";
 
 const LETTERS = ["A", "B", "C", "D"] as const;
-const CATEGORY_IDS = [
-  "cafe",
-  "turkey",
-  "general",
-  "sports",
-] as const satisfies readonly QuizCategoryId[];
-
 type Phase = "setup" | "countdown" | "playing" | "done";
 
 function quizNickname(tenantId: string) {
@@ -63,48 +59,103 @@ export function CafeQuiz() {
   const [score, setScore] = useState(0);
   const [boardReady, setBoardReady] = useState(false);
   const [submitted, setSubmitted] = useState<QuizLeaderboardEntry | null>(null);
-  const scoreRef = useRef(0);
+  const [attemptId, setAttemptId] = useState<string | null>(null);
+  const [questionDeadlineAt, setQuestionDeadlineAt] = useState<string | null>(
+    null,
+  );
+  const [questionDurationMs, setQuestionDurationMs] = useState(10_000);
+  const [starting, setStarting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const xpAttemptRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (phase !== "done" || !playedCategory) return;
-    let cancelled = false;
-    void submitQuizScore({
-      tenantId,
-      clientId: player.clientId,
-      nickname: quizNickname(tenantId),
-      avatar: player.avatar,
-      avatarUrl: readCustomerProfile()?.avatarUrl,
-      score: scoreRef.current,
-      tableId: getActiveTableLabel(tenantId),
-      category: playedCategory,
-    }).then((entry) => {
-      if (cancelled) return;
-      setSubmitted(entry);
-      setBoardReady(true);
-    });
-    void awardXp({
-      tenantId,
-      clientId: player.clientId,
-      activityName: "quiz",
-      score: scoreRef.current,
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [phase, playedCategory, player.avatar, player.clientId, tenantId]);
-
-  function startCategory() {
-    const category = getQuizCategory(categoryId);
-    const questions = category ? [...category.questions] : [];
-    if (!questions.length) return;
-    scoreRef.current = 0;
+  async function startCategory() {
+    if (starting) return;
+    setStarting(true);
+    setErrorMessage(null);
     setScore(0);
     setRound(0);
-    setItems(questions);
-    setPlayedCategory(categoryId);
     setSubmitted(null);
     setBoardReady(false);
-    setPhase("countdown");
+    try {
+      const attempt = await createQuizAttempt({
+        category: categoryId,
+        nickname: quizNickname(tenantId),
+        avatarUrl: readCustomerProfile()?.avatarUrl,
+      });
+      setAttemptId(attempt.attemptId);
+      setItems(attempt.questions);
+      setPlayedCategory(attempt.category);
+      setRound(attempt.currentIndex);
+      setScore(attempt.rawScore);
+      setQuestionDurationMs(attempt.questionDurationMs);
+      setQuestionDeadlineAt(attempt.questionDeadlineAt);
+      xpAttemptRef.current = null;
+      setPhase(attempt.questionDeadlineAt ? "playing" : "countdown");
+    } catch {
+      setErrorMessage("Quiz başlatılamadı. Mekan doğrulamanı kontrol edip tekrar dene.");
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  async function beginQuestion(questionIndex: number) {
+    const question = items[questionIndex];
+    if (!attemptId || !question) throw new Error("quiz_question_missing");
+    const timing = await beginQuizQuestion({
+      attemptId,
+      questionId: question.id,
+    });
+    setQuestionDurationMs(timing.questionDurationMs);
+    setQuestionDeadlineAt(timing.questionDeadlineAt);
+  }
+
+  async function finishCountdown() {
+    try {
+      await beginQuestion(round);
+      setPhase("playing");
+    } catch {
+      setErrorMessage(
+        "Quiz sorusu başlatılamadı. Mekan doğrulamanı kontrol edip tekrar dene.",
+      );
+      setPhase("setup");
+    }
+  }
+
+  async function advanceQuestion() {
+    if (round + 1 >= items.length) {
+      setPhase("done");
+      return;
+    }
+    const nextRound = round + 1;
+    await beginQuestion(nextRound);
+    setRound(nextRound);
+  }
+
+  async function submitAnswer(
+    questionId: string,
+    answerIndex: number,
+  ): Promise<QuizAnswer> {
+    if (!attemptId) throw new Error("quiz_attempt_missing");
+    const answer = await answerQuizQuestion({
+      attemptId,
+      questionId,
+      answerIndex,
+    });
+    setScore(answer.rawScore);
+    if (answer.completed) {
+      setSubmitted(answer.entry);
+      setBoardReady(true);
+      if (xpAttemptRef.current !== attemptId) {
+        xpAttemptRef.current = attemptId;
+        void awardXp({
+          tenantId,
+          clientId: player.clientId,
+          activityName: "quiz",
+          score: answer.rawScore,
+        });
+      }
+    }
+    return answer;
   }
 
   function playAgain() {
@@ -112,9 +163,13 @@ export function CafeQuiz() {
     setBoardReady(false);
     setPlayedCategory(null);
     setItems([]);
+    setAttemptId(null);
+    setQuestionDeadlineAt(null);
+    setQuestionDurationMs(10_000);
     setRound(0);
     setScore(0);
-    scoreRef.current = 0;
+    setErrorMessage(null);
+    xpAttemptRef.current = null;
     setPhase("setup");
   }
 
@@ -135,7 +190,7 @@ export function CafeQuiz() {
           {copy.quizPickLead}
         </p>
         <div className="mt-4 grid grid-cols-2 gap-2">
-          {CATEGORY_IDS.map((id) => {
+          {QUIZ_CATEGORY_IDS.map((id) => {
             const active = categoryId === id;
             return (
               <button
@@ -153,12 +208,18 @@ export function CafeQuiz() {
             );
           })}
         </div>
+        {errorMessage ? (
+          <p className="mt-3 text-center font-sans text-xs font-semibold text-red-600">
+            {errorMessage}
+          </p>
+        ) : null}
         <button
           type="button"
-          onClick={startCategory}
+          onClick={() => void startCategory()}
+          disabled={starting}
           className="mt-auto min-h-14 w-full rounded-2xl bg-[var(--btn-primary)] px-4 py-3.5 font-sans text-sm font-black text-[var(--btn-text)] shadow-lg transition active:scale-95 active:brightness-95"
         >
-          {copy.quizStart}
+          {starting ? "Quiz hazırlanıyor..." : copy.quizStart}
         </button>
       </section>
     );
@@ -167,7 +228,7 @@ export function CafeQuiz() {
   if (phase === "countdown") {
     return (
       <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-        <GameCountdown onDone={() => setPhase("playing")} />
+        <GameCountdown onDone={() => void finishCountdown()} />
       </section>
     );
   }
@@ -190,7 +251,7 @@ export function CafeQuiz() {
             </p>
           ) : null}
           <p className="mt-2 font-sans text-sm font-medium text-[var(--text-body)]">
-            {copy.leaderboardAllTime}
+            Bu haftanın sıralaması
           </p>
           {boardReady ? (
             <div className="mt-6 text-left">
@@ -221,10 +282,12 @@ export function CafeQuiz() {
         </div>
       ) : (
         <QuizRound
-          key={item.prompt}
+          key={item.id}
+          questionId={item.id}
+          questionDeadlineAt={questionDeadlineAt}
+          questionDurationMs={questionDurationMs}
           prompt={item.prompt}
           options={item.options}
-          answer={item.answer}
           current={round + 1}
           total={items.length}
           roundLabel={copy.roundTemplate}
@@ -232,17 +295,8 @@ export function CafeQuiz() {
           letters={copy.optionLetters ?? LETTERS}
           nextLabel={copy.nextQuestion}
           resultsLabel={copy.seeResults}
-          onPoints={(points) => {
-            scoreRef.current += points;
-            setScore(scoreRef.current);
-          }}
-          onAdvance={() => {
-            if (round + 1 >= items.length) {
-              setPhase("done");
-              return;
-            }
-            setRound((current) => current + 1);
-          }}
+          onAnswer={submitAnswer}
+          onAdvance={advanceQuestion}
         />
       )}
     </section>
@@ -250,9 +304,11 @@ export function CafeQuiz() {
 }
 
 function QuizRound({
+  questionId,
+  questionDeadlineAt,
+  questionDurationMs,
   prompt,
   options,
-  answer,
   current,
   total,
   roundLabel,
@@ -260,12 +316,14 @@ function QuizRound({
   letters,
   nextLabel,
   resultsLabel,
-  onPoints,
+  onAnswer,
   onAdvance,
 }: {
+  questionId: string;
+  questionDeadlineAt: string | null;
+  questionDurationMs: number;
   prompt: string;
   options: readonly string[];
-  answer: number;
   current: number;
   total: number;
   roundLabel: string;
@@ -273,31 +331,71 @@ function QuizRound({
   letters: readonly string[];
   nextLabel: string;
   resultsLabel: string;
-  onPoints: (points: number) => void;
-  onAdvance: () => void;
+  onAnswer: (questionId: string, answerIndex: number) => Promise<QuizAnswer>;
+  onAdvance: () => Promise<void>;
 }) {
-  const [remaining, setRemaining] = useState(10_000);
+  const [remaining, setRemaining] = useState(() =>
+    Math.max(0, Date.parse(questionDeadlineAt ?? "") - Date.now()),
+  );
   const [selected, setSelected] = useState<number | null>(null);
+  const [correctAnswer, setCorrectAnswer] = useState<number | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [answerError, setAnswerError] = useState(false);
+  const [advanceError, setAdvanceError] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
+  const timeoutSubmittedRef = useRef(false);
   const locked = selected != null;
+
+  const submitChoice = useCallback(
+    async (index: number) => {
+      if (selected != null || submitting) return;
+      setSelected(index);
+      setSubmitting(true);
+      setAnswerError(false);
+      try {
+        const result = await onAnswer(questionId, index);
+        setCorrectAnswer(result.correctAnswer);
+      } catch {
+        setSelected(null);
+        setAnswerError(true);
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [onAnswer, questionId, selected, submitting],
+  );
 
   useEffect(() => {
     if (locked) return;
-    const start = Date.now();
+    const deadline = Date.parse(questionDeadlineAt ?? "");
+    if (!Number.isFinite(deadline)) return;
     const timer = window.setInterval(() => {
-      const left = Math.max(0, 10_000 - (Date.now() - start));
+      const left = Math.max(0, deadline - Date.now());
       setRemaining(left);
-      if (left <= 0) {
+      if (left <= 0 && !timeoutSubmittedRef.current) {
+        timeoutSubmittedRef.current = true;
         window.clearInterval(timer);
-        setSelected(-1);
+        void submitChoice(-1);
       }
     }, 100);
     return () => window.clearInterval(timer);
-  }, [locked]);
+  }, [locked, questionDeadlineAt, submitChoice]);
 
   function choose(index: number) {
-    if (locked) return;
-    setSelected(index);
-    if (index === answer) onPoints(100 + Math.ceil(remaining / 100));
+    void submitChoice(index);
+  }
+
+  async function advance() {
+    if (advancing) return;
+    setAdvancing(true);
+    setAdvanceError(false);
+    try {
+      await onAdvance();
+    } catch {
+      setAdvanceError(true);
+    } finally {
+      setAdvancing(false);
+    }
   }
 
   const urgent = remaining < 4000 && !locked;
@@ -323,7 +421,9 @@ function QuizRound({
             className={`h-full rounded-full bg-[var(--btn-primary)] ${
               urgent ? "quiz-timer-pulse" : ""
             }`}
-            style={{ width: `${remaining / 100}%` }}
+            style={{
+              width: `${Math.min(100, (remaining / questionDurationMs) * 100)}%`,
+            }}
           />
         </div>
       </div>
@@ -337,15 +437,16 @@ function QuizRound({
       <div className="mt-3 grid min-w-0 shrink-0 gap-2 overflow-x-hidden">
         {options.map((option, index) => {
           const chosen = selected === index;
-          const isCorrect = locked && index === answer;
-          const isWrong = chosen && index !== answer;
-          const idleLocked = locked && !isCorrect && !isWrong;
+          const answered = correctAnswer != null;
+          const isCorrect = answered && index === correctAnswer;
+          const isWrong = answered && chosen && index !== correctAnswer;
+          const idleLocked = answered && !isCorrect && !isWrong;
           const letter = letters[index] ?? String(index + 1);
           return (
             <button
               key={option}
               type="button"
-              disabled={locked}
+              disabled={locked || submitting}
               onClick={() => choose(index)}
               className={`flex min-h-[48px] w-full min-w-0 max-w-full items-center gap-3 overflow-hidden rounded-2xl border-2 px-3.5 py-2.5 text-left font-sans text-sm font-bold transition-colors active:scale-[0.98] ${
                 isCorrect
@@ -374,12 +475,24 @@ function QuizRound({
         })}
       </div>
 
+      {answerError ? (
+        <p className="mt-2 text-center font-sans text-xs font-semibold text-red-600">
+          Cevap kaydedilemedi. Tekrar dene.
+        </p>
+      ) : null}
+
+      {advanceError ? (
+        <p className="mt-2 text-center font-sans text-xs font-semibold text-red-600">
+          Sonraki soru başlatılamadı. Tekrar dene.
+        </p>
+      ) : null}
+
       <button
         type="button"
-        disabled={!locked}
-        onClick={onAdvance}
+        disabled={correctAnswer == null || submitting || advancing}
+        onClick={() => void advance()}
         className={`mt-auto min-h-[48px] w-full shrink-0 rounded-2xl bg-[var(--btn-primary)] py-3 font-sans text-base font-extrabold text-[var(--btn-text)] shadow-md transition-all ${
-          locked
+          correctAnswer != null && !submitting && !advancing
             ? "hover:brightness-95 active:scale-95 active:brightness-95"
             : "cursor-not-allowed opacity-50"
         }`}

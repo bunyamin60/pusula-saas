@@ -17,8 +17,10 @@ import { arcadeGameCopy, featuredArcadeGames } from "@/lib/gameCatalog";
 import {
   entryAvatarSrc,
   fetchQuizLeaderboard,
+  fetchWeeklyLeaderboard,
   type ArcadeScoreGame,
   type QuizLeaderboardEntry,
+  type WeeklyLeagueEntry,
 } from "@/lib/duelLeaderboard";
 import { resolveLogoUrl } from "@/lib/tenant";
 import { getActiveTableLabel } from "@/lib/tableSession";
@@ -133,10 +135,13 @@ function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
   const visible = featuredArcadeGames(campaign.enabledGames);
 
   useEffect(() => {
-    setTab(readLobbyTab(tenantId));
-    const focus = readLobbyRaceFocus(tenantId);
-    setRaceFocus(focus);
-    if (focus) clearLobbyRaceFocus(tenantId);
+    const frame = window.requestAnimationFrame(() => {
+      setTab(readLobbyTab(tenantId));
+      const focus = readLobbyRaceFocus(tenantId);
+      setRaceFocus(focus);
+      if (focus) clearLobbyRaceFocus(tenantId);
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [tenantId]);
 
   useEffect(() => {
@@ -189,6 +194,7 @@ function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
           </div>
         ) : tab === "events" ? (
           <div className="mt-3 space-y-4">
+            <WeeklyLeagueCard />
             {raceFocus === "blockblast" ? (
               <>
                 <EventsRaceCard
@@ -241,6 +247,84 @@ function GameLobby({ onBackWelcome }: { onBackWelcome: () => void }) {
           <DeviceTestReset />
         </div>
       </div>
+    </section>
+  );
+}
+
+function WeeklyLeagueCard() {
+  const { runWithSlowGuard } = useAppLoading();
+  const [entries, setEntries] = useState<WeeklyLeagueEntry[] | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void runWithSlowGuard(fetchWeeklyLeaderboard).then((result) => {
+      if (active) setEntries(result.filter((entry) => entry.rank <= 5).slice(0, 5));
+    });
+    return () => {
+      active = false;
+    };
+  }, [runWithSlowGuard]);
+
+  return (
+    <section className="rounded-3xl border border-[var(--border)] bg-[var(--card-surface)] p-5 shadow-sm">
+      <div className="flex items-center gap-2">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-[var(--btn-primary)] text-[var(--btn-text)]">
+          <Award className="size-4" aria-hidden />
+        </span>
+        <div className="min-w-0">
+          <p className="font-sans text-[11px] font-black uppercase tracking-wider text-[var(--text-headline)]">
+            Haftalık Lig
+          </p>
+          <p className="mt-0.5 font-sans text-sm font-extrabold tracking-tight text-[var(--text-headline)]">
+            Genel Sıralama
+          </p>
+        </div>
+      </div>
+
+      {entries == null ? (
+        <p className="mt-4 text-center font-sans text-sm font-medium text-[var(--text-body)]">
+          Sıralama yükleniyor...
+        </p>
+      ) : entries.length === 0 ? (
+        <p className="mt-4 text-center font-sans text-sm font-medium text-[var(--text-body)]">
+          Bu hafta henüz lig puanı yok.
+        </p>
+      ) : (
+        <ol className="mt-4 space-y-1.5">
+          {entries.map((entry) => (
+            <li
+              key={entry.playerKey}
+              className={`grid grid-cols-[2rem_auto_1fr_auto] items-center gap-2 rounded-2xl border border-[var(--border)] px-3 py-2 ${
+                entry.isCurrent
+                  ? "bg-[var(--btn-primary)]/25"
+                  : "bg-[var(--bg-canvas)]"
+              }`}
+            >
+              <span className="flex items-center justify-center font-sans text-xs font-black tabular-nums text-[var(--text-headline)]">
+                <RankMedal rank={entry.rank} />
+              </span>
+              {entry.avatarUrl ? (
+                <span className="relative size-8 shrink-0 overflow-hidden rounded-full border border-[var(--border)]">
+                  <GuestAvatarImage src={entry.avatarUrl} sizes="32px" />
+                </span>
+              ) : (
+                <span className="size-8 shrink-0" aria-hidden />
+              )}
+              <span className="min-w-0 truncate font-sans text-xs font-bold text-[var(--text-headline)]">
+                {entry.nickname}
+                {entry.isCurrent ? (
+                  <span className="ml-1 text-[9px] uppercase tracking-wider text-[var(--text-body)]">
+                    Sen
+                  </span>
+                ) : null}
+              </span>
+              <span className="font-sans text-xs font-black tabular-nums text-[var(--text-headline)]">
+                {entry.leaguePoints} LP
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
     </section>
   );
 }

@@ -9,7 +9,6 @@ import {
 } from "react";
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import { Hourglass, WifiOff, X } from "lucide-react";
-import { QuizResultRank } from "@/components/DuelLeaderboard";
 import { RewardProgressBar } from "@/components/RewardProgressBar";
 import { tenantConfig, type DuelGameId } from "@/config/tenant.config";
 import {
@@ -18,8 +17,11 @@ import {
   type DuelMatch,
   type DuelPlayer,
 } from "@/lib/duel";
+import {
+  getAllDuelQuizQuestions,
+  type DuelQuizQuestion,
+} from "@/lib/duelQuizBank";
 import { getSupabase, isRealtimeJoined, wakeRealtime } from "@/lib/supabase";
-import { getAllQuizQuestions, type QuizQuestion } from "@/lib/quizBank";
 
 const COUNTDOWN_MS = 3000;
 const READY_RESEND_MS = 500;
@@ -28,7 +30,6 @@ const DISCONNECT_GRACE_MS = 4000;
 const REMATCH_RESPONSE_TIMEOUT_MS = 4000;
 
 type GameContainerProps = {
-  tenantId: string;
   match: DuelMatch;
   player: DuelPlayer;
   onExit: () => void;
@@ -39,7 +40,6 @@ type StartPayload = { startAt: number };
 type PlayerPayload = { playerId: string };
 
 export function DuelMatchContainer({
-  tenantId,
   match,
   player,
   onExit,
@@ -493,9 +493,6 @@ export function DuelMatchContainer({
             <ConnectionFailed onExit={onExit} />
           ) : finished ? (
             <ResultScreen
-              tenantId={tenantId}
-              gameId={match.gameId}
-              player={player}
               localScore={localFinal}
               opponentScore={opponentFinal}
               rematchIncoming={rematchIncoming}
@@ -728,7 +725,7 @@ function ScorePill({
 function scoreCeiling(gameId: DuelGameId): number {
   if (gameId === "trivia") return 1000;
   if (gameId === "emoji") return 800;
-  if (gameId === "quiz") return getAllQuizQuestions().length * 200;
+  if (gameId === "quiz") return getAllDuelQuizQuestions().length * 200;
   if (gameId === "swipe") return tenantConfig.duel.swipe.length;
   return 1;
 }
@@ -775,7 +772,7 @@ function GameEngine({
 type ChoiceItem =
   | (typeof tenantConfig.duel.trivia)[number]
   | (typeof tenantConfig.duel.emoji)[number]
-  | QuizQuestion;
+  | DuelQuizQuestion;
 
 function ChoiceRounds({
   gameId,
@@ -791,7 +788,7 @@ function ChoiceRounds({
       ? tenantConfig.duel.trivia
       : gameId === "emoji"
         ? tenantConfig.duel.emoji
-        : getAllQuizQuestions();
+        : getAllDuelQuizQuestions();
   const [round, setRound] = useState(0);
 
   useEffect(() => {
@@ -1071,9 +1068,6 @@ function NumberRush({
 }
 
 function ResultScreen({
-  tenantId,
-  gameId,
-  player,
   localScore,
   opponentScore,
   rematchIncoming,
@@ -1082,9 +1076,6 @@ function ResultScreen({
   onRematch,
   onExit,
 }: {
-  tenantId: string;
-  gameId: DuelGameId;
-  player: DuelPlayer;
   localScore: number;
   opponentScore: number;
   rematchIncoming: boolean;
@@ -1111,13 +1102,6 @@ function ResultScreen({
         <p className="mt-4 font-display text-2xl text-primary">
           {localScore} — {opponentScore}
         </p>
-        {gameId === "quiz" ? (
-          <QuizResultRank
-            tenantId={tenantId}
-            player={player}
-            score={localScore}
-          />
-        ) : null}
         {rematchIncoming ? (
           <p className="mt-3 animate-pulse text-sm font-medium tracking-wide text-muted">
             {copy.rematchIncoming}

@@ -94,7 +94,6 @@ export function DuelStage() {
     <>
       {match ? (
         <DuelMatchContainer
-          tenantId={tenantId}
           match={match}
           player={player}
           onExit={exitMatch}

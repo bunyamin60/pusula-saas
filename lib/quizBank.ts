@@ -1,30 +1,22 @@
 import { tenantConfig } from "@/config/tenant.config";
 
 export type QuizQuestion = {
+  id: string;
   prompt: string;
   options: readonly string[];
-  answer: number;
 };
 
 export type QuizCategoryId = "cafe" | "turkey" | "general" | "sports";
 
-export type QuizCategory = {
-  id: QuizCategoryId;
-  questions: readonly QuizQuestion[];
-};
+export const QUIZ_CATEGORY_IDS = [
+  "cafe",
+  "turkey",
+  "general",
+  "sports",
+] as const satisfies readonly QuizCategoryId[];
 
-export function getQuizCategories(): readonly QuizCategory[] {
-  return tenantConfig.duel.quizCategories as readonly QuizCategory[];
-}
-
-export function getQuizCategory(
-  id: QuizCategoryId,
-): QuizCategory | undefined {
-  return getQuizCategories().find((category) => category.id === id);
-}
-
-export function getAllQuizQuestions(): QuizQuestion[] {
-  return getQuizCategories().flatMap((category) => [...category.questions]);
+export function isQuizCategoryId(value: string): value is QuizCategoryId {
+  return QUIZ_CATEGORY_IDS.includes(value as QuizCategoryId);
 }
 
 export function quizCategoryTitle(id: QuizCategoryId): string {

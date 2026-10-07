@@ -10,7 +10,6 @@ import { readCustomerProfile, type CustomerProfile } from "@/lib/customerProfile
 import {
   entryAvatarSrc,
   fetchQuizLeaderboard,
-  submitQuizScore,
   type QuizLeaderboardEntry,
 } from "@/lib/duelLeaderboard";
 import type { DuelPlayer } from "@/lib/duel";
@@ -46,12 +45,16 @@ export function DuelLeaderboard({
 }) {
   const copy = tenantConfig.copy.duel;
   const { chooseIdentity } = useDuel();
+  void score;
   const [entries, setEntries] = useState<QuizLeaderboardEntry[] | null>(null);
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
 
   useEffect(() => {
-    setProfile(readCustomerProfile());
+    const frame = window.requestAnimationFrame(() => {
+      setProfile(readCustomerProfile());
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, []);
 
   useEffect(() => {
@@ -70,38 +73,21 @@ export function DuelLeaderboard({
   }, [category, player.clientId, tenantId]);
 
   const topTen = entries?.filter((entry) => entry.rank <= 10) ?? [];
-  const ownEntry = entries?.find((entry) => entry.clientId === player.clientId);
+  const ownEntry = entries?.find((entry) => entry.isCurrent);
   const ownOutsideTopTen =
     ownEntry && ownEntry.rank > 10 ? ownEntry : undefined;
-  const showSaveCta = !profile && (score != null || Boolean(ownEntry));
+  const showSaveCta = !profile && Boolean(ownEntry);
 
   async function bindScore(next: CustomerProfile) {
     setProfile(next);
     chooseIdentity({ nickname: next.name, avatar: player.avatar });
-    const boundScore = score ?? ownEntry?.score ?? 0;
-    const updated = await submitQuizScore({
-      tenantId,
-      clientId: player.clientId,
-      nickname: next.name,
-      avatar: player.avatar,
-      score: boundScore,
-      tableId: getActiveTableLabel(tenantId),
-      avatarUrl: next.avatarUrl,
-      category,
-    });
     const refreshed = await fetchQuizLeaderboard(
       tenantId,
       player.clientId,
       "quiz",
       category,
     );
-    setEntries(
-      refreshed.length > 0
-        ? refreshed
-        : updated
-          ? [updated]
-          : entries,
-    );
+    setEntries(refreshed.length > 0 ? refreshed : entries);
   }
 
   return (
@@ -112,7 +98,7 @@ export function DuelLeaderboard({
             {copy.leaderboardTitle}
           </p>
           <p className="mt-1 font-sans text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--text-body)]">
-            {copy.leaderboardAllTime}
+            Bu haftanın sıralaması
           </p>
         </div>
         <span className="flex size-9 items-center justify-center rounded-xl bg-[var(--btn-primary)] text-[var(--btn-text)]">
@@ -134,9 +120,9 @@ export function DuelLeaderboard({
             <LeaderboardRow
               key={entry.clientId}
               entry={entry}
-              current={entry.clientId === player.clientId}
+              current={entry.isCurrent}
               label={
-                entry.clientId === player.clientId
+                entry.isCurrent
                   ? currentRowLabel(profile, tenantId)
                   : entry.nickname
               }
@@ -226,69 +212,5 @@ function LeaderboardRow({
         )}
       </span>
     </li>
-  );
-}
-
-export function QuizResultRank({
-  tenantId,
-  player,
-  score,
-}: {
-  tenantId: string;
-  player: PlayerIdentity;
-  score: number;
-}) {
-  const copy = tenantConfig.copy.duel;
-  const [result, setResult] = useState<{
-    own: QuizLeaderboardEntry;
-    leader: QuizLeaderboardEntry;
-  } | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    const profile = readCustomerProfile();
-    void submitQuizScore({
-      tenantId,
-      clientId: player.clientId,
-      nickname: profile?.name || guestScoreName(tenantId),
-      avatar: player.avatar,
-      score,
-      tableId: getActiveTableLabel(tenantId),
-      avatarUrl: profile?.avatarUrl,
-    }).then(async (own) => {
-      if (!own) return;
-      const entries = await fetchQuizLeaderboard(tenantId, player.clientId);
-      const leader = entries.find((entry) => entry.rank === 1) ?? own;
-      if (active) setResult({ own, leader });
-    });
-    return () => {
-      active = false;
-    };
-  }, [
-    player.avatar,
-    player.clientId,
-    player.nickname,
-    score,
-    tenantId,
-  ]);
-
-  if (!result) return null;
-  const gap = Math.max(0, result.leader.score - result.own.score);
-
-  return (
-    <div className="mx-auto mt-5 max-w-xs rounded-2xl border border-[var(--border)] bg-[var(--card-surface)] px-4 py-3">
-      <p className="font-sans text-xs font-semibold tracking-wide text-[var(--text-headline)]">
-        {result.own.rank === 1
-          ? copy.leaderboardRecord
-          : result.own.rank <= 5
-            ? copy.rankTop.replace("{rank}", String(result.own.rank))
-            : copy.rankOther.replace("{rank}", String(result.own.rank))}
-      </p>
-      {gap > 0 ? (
-        <p className="mt-1 font-sans text-[11px] font-medium tracking-wide text-[var(--text-body)]">
-          {copy.leaderboardGapTemplate.replace("{score}", String(gap))}
-        </p>
-      ) : null}
-    </div>
   );
 }

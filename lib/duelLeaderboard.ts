@@ -1,4 +1,3 @@
-import { getSupabase } from "@/lib/supabase";
 import { readCustomerProfile } from "@/lib/customerProfile";
 import { isGuestAvatarUrl } from "@/lib/guestAvatars";
 import type { QuizCategoryId } from "@/lib/quizBank";
@@ -16,38 +15,57 @@ export type QuizLeaderboardEntry = {
   tableId?: string | null;
   avatarUrl?: string | null;
   category?: string | null;
+  isCurrent: boolean;
+  weekStart: string;
 };
 
-type QuizLeaderboardRow = {
-  tenant_id: string;
-  client_id: string;
+export type WeeklyLeagueEntry = {
+  playerKey: string;
   nickname: string;
-  avatar: string;
-  score: number;
-  completed_at: string;
-  rank: number | string;
-  table_id?: string | null;
-  avatar_url?: string | null;
-  category?: string | null;
+  avatarUrl: string | null;
+  leaguePoints: number;
+  bestGamePoints: number;
+  contributingGames: number;
+  firstContributionAt: string;
+  rank: number;
+  isCurrent: boolean;
+  weekStart: string;
 };
 
-function fromRow(row: QuizLeaderboardRow): QuizLeaderboardEntry {
-  return {
-    tenantId: row.tenant_id,
-    clientId: row.client_id,
-    nickname: row.nickname,
-    avatar: row.avatar,
-    score: row.score,
-    completedAt: row.completed_at,
-    rank: Number(row.rank),
-    tableId: row.table_id ?? null,
-    avatarUrl: isGuestAvatarUrl(row.avatar_url) ? row.avatar_url : null,
-    category: row.category ?? null,
-  };
-}
+type GameLeaderboardApiEntry = {
+  playerKey: string;
+  nickname: string;
+  avatarUrl: string | null;
+  rawScore: number;
+  submittedAt: string;
+  rank: number;
+  isCurrent: boolean;
+  category: string;
+  weekStart: string;
+};
 
-function clampScore(score: number): number {
-  return Math.max(0, Math.min(999999, Math.round(score)));
+type LeaderboardResponse<T> = {
+  ok: boolean;
+  accepted?: boolean;
+  entries?: T[];
+  entry?: T | null;
+};
+
+function fromApi(entry: GameLeaderboardApiEntry): QuizLeaderboardEntry {
+  return {
+    tenantId: "",
+    clientId: entry.playerKey,
+    nickname: entry.nickname,
+    avatar: "",
+    score: entry.rawScore,
+    completedAt: entry.submittedAt,
+    rank: Number(entry.rank),
+    tableId: null,
+    avatarUrl: isGuestAvatarUrl(entry.avatarUrl) ? entry.avatarUrl : null,
+    category: entry.category || null,
+    isCurrent: entry.isCurrent,
+    weekStart: entry.weekStart,
+  };
 }
 
 /** Only registered / picked avatars — never invent a default for guests. */
@@ -63,7 +81,7 @@ export function resolveScoreAvatarUrl(
 }
 
 export function entryAvatarSrc(
-  entry: QuizLeaderboardEntry,
+  entry: Pick<QuizLeaderboardEntry, "avatarUrl">,
 ): string | null {
   return isGuestAvatarUrl(entry.avatarUrl) ? entry.avatarUrl : null;
 }
@@ -74,33 +92,32 @@ export async function fetchQuizLeaderboard(
   gameType: ArcadeScoreGame = "quiz",
   category?: QuizCategoryId | string | null,
 ): Promise<QuizLeaderboardEntry[]> {
+  void tenantId;
+  void clientId;
   try {
-    const supabase = getSupabase();
-    if (!supabase || !tenantId) return [];
-    const withCategory = await supabase.rpc("get_duel_quiz_leaderboard", {
-      p_tenant_id: tenantId,
-      p_client_id: clientId ?? null,
-      p_game_type: gameType,
-      p_category: category ?? null,
+    const params = new URLSearchParams({ gameKey: gameType });
+    if (category) params.set("category", category.toString().toLowerCase());
+    const response = await fetch(`/api/leaderboard?${params.toString()}`, {
+      credentials: "same-origin",
+      cache: "no-store",
     });
-    if (!withCategory.error && Array.isArray(withCategory.data)) {
-      return (withCategory.data as QuizLeaderboardRow[]).map(fromRow);
-    }
-    const withType = await supabase.rpc("get_duel_quiz_leaderboard", {
-      p_tenant_id: tenantId,
-      p_client_id: clientId ?? null,
-      p_game_type: gameType,
+    if (!response.ok) return [];
+    const payload = (await response.json()) as LeaderboardResponse<GameLeaderboardApiEntry>;
+    return Array.isArray(payload.entries) ? payload.entries.map(fromApi) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchWeeklyLeaderboard(): Promise<WeeklyLeagueEntry[]> {
+  try {
+    const response = await fetch("/api/leaderboard?scope=weekly", {
+      credentials: "same-origin",
+      cache: "no-store",
     });
-    if (!withType.error && Array.isArray(withType.data)) {
-      return (withType.data as QuizLeaderboardRow[]).map(fromRow);
-    }
-    if (gameType !== "quiz") return [];
-    const { data, error } = await supabase.rpc("get_duel_quiz_leaderboard", {
-      p_tenant_id: tenantId,
-      p_client_id: clientId ?? null,
-    });
-    if (error || !Array.isArray(data)) return [];
-    return (data as QuizLeaderboardRow[]).map(fromRow);
+    if (!response.ok) return [];
+    const payload = (await response.json()) as LeaderboardResponse<WeeklyLeagueEntry>;
+    return Array.isArray(payload.entries) ? payload.entries : [];
   } catch {
     return [];
   }
@@ -116,53 +133,34 @@ export async function submitQuizScore(input: {
   tableId?: string | null;
   avatarUrl?: string | null;
   category?: QuizCategoryId | string | null;
+  submissionId?: string;
 }): Promise<QuizLeaderboardEntry | null> {
+  void input.tenantId;
+  void input.clientId;
+  void input.avatar;
+  void input.tableId;
+  if ((input.gameType ?? "quiz") !== "blockblast") return null;
   try {
-    const supabase = getSupabase();
-    if (!supabase || !input.tenantId) return null;
-    const avatarUrl = resolveScoreAvatarUrl(input.avatarUrl);
-    const payload = {
-      p_tenant_id: input.tenantId,
-      p_client_id: input.clientId,
-      p_nickname: input.nickname.slice(0, 64),
-      p_avatar: input.avatar.slice(0, 16) || "•",
-      p_score: clampScore(input.score),
-      p_game_type: input.gameType ?? "quiz",
-      p_table_id: input.tableId?.trim() || null,
-      p_avatar_url: avatarUrl,
-      p_category:
-        input.gameType === "blockblast"
-          ? ""
-          : (input.category ?? "").toString().toLowerCase(),
-    };
-    const withCategory = await supabase.rpc("submit_duel_quiz_score", payload);
-    if (
-      !withCategory.error &&
-      Array.isArray(withCategory.data) &&
-      withCategory.data.length > 0
-    ) {
-      return fromRow(withCategory.data[0] as QuizLeaderboardRow);
-    }
-    const { p_category: _ignoredCategory, ...withoutCategory } = payload;
-    void _ignoredCategory;
-    const withType = await supabase.rpc("submit_duel_quiz_score", withoutCategory);
-    if (
-      !withType.error &&
-      Array.isArray(withType.data) &&
-      withType.data.length > 0
-    ) {
-      return fromRow(withType.data[0] as QuizLeaderboardRow);
-    }
-    if (input.gameType && input.gameType !== "quiz") return null;
-    const { data, error } = await supabase.rpc("submit_duel_quiz_score", {
-      p_tenant_id: payload.p_tenant_id,
-      p_client_id: payload.p_client_id,
-      p_nickname: payload.p_nickname,
-      p_avatar: payload.p_avatar,
-      p_score: Math.min(1600, payload.p_score),
+    const response = await fetch("/api/leaderboard", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        gameKey: input.gameType ?? "quiz",
+        rawScore: Math.round(input.score),
+        category:
+          input.gameType === "blockblast"
+            ? ""
+            : (input.category ?? "").toString().toLowerCase(),
+        nickname: input.nickname.slice(0, 64),
+        avatarUrl: resolveScoreAvatarUrl(input.avatarUrl),
+        submissionId: input.submissionId,
+      }),
     });
-    if (error || !Array.isArray(data) || data.length === 0) return null;
-    return fromRow(data[0] as QuizLeaderboardRow);
+    const payload = (await response.json()) as LeaderboardResponse<GameLeaderboardApiEntry>;
+    return response.ok && payload.accepted === true && payload.entry
+      ? fromApi(payload.entry)
+      : null;
   } catch {
     return null;
   }
